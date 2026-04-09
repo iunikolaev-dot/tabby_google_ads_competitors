@@ -1,0 +1,25 @@
+{
+  "batch_id": "recovery_20260409_211510_b74955cf",
+  "snapshot_path": "/Users/ilyanikolaev/tabby_recovery_snapshot_20260409_175604.js",
+  "stats": {
+    "batch_id": "recovery_20260409_211510_b74955cf",
+    "rows_before": 2513,
+    "rows_after": 3090,
+    "rows_added": 577,
+    "rows_updated": 36,
+    "rows_rejected_no_cr": 0,
+    "rows_in_input": 613,
+    "regions_merged": 36,
+    "sha256_before": "1808e07f809d3f55026cf9265b4b4e9c6bce8ede65a531aeed4b3d53a3c93a77",
+    "sha256_after": "99517dcc72edb43ca5962d603c09c5b67a778618af1c23c86397917dc8a87e2c",
+    "postcondition_failures": [],
+    "ok": true
+  },
+  "per_competitor": {
+    "Monzo": 18,
+    "Cash App": 151,
+    "Revolut": 176,
+    "Wise": 265,
+    "Klarna": 3
+  }
+}
