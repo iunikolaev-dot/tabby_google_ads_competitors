@@ -166,11 +166,21 @@ def _sha256_of_file(path: Path) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _is_valid_row(row: dict) -> bool:
-    """Invariant I2: every row must have a non-empty Creative ID."""
+    """
+    Invariant I2: every row must have a non-empty Creative ID.
+    Also rejects HTML5 rich-media bundles (config rule: never store these).
+    """
     if not isinstance(row, dict):
         return False
     cr = row.get("Creative ID", "")
-    return isinstance(cr, str) and cr.strip() != ""
+    if not isinstance(cr, str) or not cr.strip():
+        return False
+    # Reject HTML5 rich-media: check all URL fields for indicators.
+    for field_name in ("Ad Preview URL", "Image URL", "Video URL"):
+        val = row.get(field_name, "") or ""
+        if any(ind in val for ind in config.HTML5_REJECT_INDICATORS):
+            return False
+    return True
 
 
 def _merge_regions(existing_row: dict, new_row: dict) -> int:

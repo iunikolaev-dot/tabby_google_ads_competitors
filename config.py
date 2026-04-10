@@ -254,8 +254,25 @@ FIRECRAWL_MIN_PREVIEW_COVERAGE: float = 0.70
 APIFY_META_ACTOR: str = "curious_coder/facebook-ads-library-scraper"
 APIFY_GOOGLE_ACTOR: str = "crawlerbros/google-ads-scraper"
 
-# Google HTML5 rich-media and similar formats we cannot render. Ads of these
-# formats MAY be marked retired=true per Invariant I6.
+# ── Ingestion rules (hard filters) ──────────────────────────────────────
+#
+# Rule 1: HTML5 rich-media ads are REJECTED on ingestion (never stored).
+#   These render as interactive JS bundles (displayads-formats.googleusercontent.com
+#   / content.js / sadbundle) with no static thumbnail. No scraper can fix this.
+#   If any slip through, pipeline/merge.py deletes them on the next merge.
+#
+# Rule 2: When using crawlerbros (Apify Google scraper), EXCLUDE format=IMAGE.
+#   Reason: IMAGE-format results from the Transparency Center are mostly HTML5
+#   bundles mislabeled as IMAGE, with previewUrl pointing to content.js. The
+#   useful thumbnails (simgad) are already captured by FireCrawl's listing page.
+#   Only VIDEO and TEXT formats are requested from crawlerbros.
+GOOGLE_REJECTED_FORMATS: set[str] = {"IMAGE"}  # crawlerbros format filter
+HTML5_REJECT_INDICATORS: tuple[str, ...] = (
+    "displayads-formats.googleusercontent.com",
+    "content.js",
+    "sadbundle",
+)
+# Legacy constant kept for any code that references it.
 RETIREABLE_FORMATS: set[str] = {"html5_bundle", "rich_media_html5"}
 
 
@@ -268,6 +285,10 @@ MAX_FIRECRAWL_PAGES_PER_RUN: int = 100
 MAX_VISION_CALLS_PER_RUN: int = 500
 MAX_RETRIES_PER_API_CALL: int = 2
 APIFY_MIN_BALANCE_USD: float = 5.00     # Precondition P4
+APIFY_MONTHLY_BUDGET_USD: float = 29.00 # Plan hard cap
+APIFY_ORG_USER_ID: str = "gKw51ox5Nq9w1qdft"
+APIFY_USAGE_URL: str = "https://api.apify.com/v2/users/me/usage/monthly"
+APIFY_LIMITS_URL: str = "https://api.apify.com/v2/users/me/limits"
 
 # Row count sanity floor: new merged file must have ≥ this fraction of rows
 # compared to the previous successful batch (Precondition P1 / Postcondition Q1).
