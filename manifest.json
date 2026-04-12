@@ -1,8 +1,8 @@
 {
   "batch_id": "migration_image_preview_20260409_225009_64ab36ce",
-  "row_count": 3090,
-  "sha256": "2d5f8e13f1cb863b9a7ebfd57ebfd69397c6f45c415bbf6c5a07e9d45e6077fa",
-  "timestamp": "2026-04-09T18:50:09.901116+00:00",
+  "row_count": 3011,
+  "sha256": "74533da05d4e7fb470c4536d7eb0d44dabfde6fa7fea56c17f35ce9ddfdd6346",
+  "timestamp": "2026-04-12T08:31:21.016764+00:00",
   "preview_validator_ran": false,
   "schema_version": 2,
   "history": [

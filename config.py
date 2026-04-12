@@ -266,7 +266,7 @@ APIFY_GOOGLE_ACTOR: str = "crawlerbros/google-ads-scraper"
 #   bundles mislabeled as IMAGE, with previewUrl pointing to content.js. The
 #   useful thumbnails (simgad) are already captured by FireCrawl's listing page.
 #   Only VIDEO and TEXT formats are requested from crawlerbros.
-GOOGLE_REJECTED_FORMATS: set[str] = {"IMAGE"}  # crawlerbros format filter
+GOOGLE_REJECTED_FORMATS: set[str] = {"IMAGE", "TEXT"}  # crawlerbros format filter
 HTML5_REJECT_INDICATORS: tuple[str, ...] = (
     "displayads-formats.googleusercontent.com",
     "content.js",

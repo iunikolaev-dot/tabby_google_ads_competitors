@@ -180,6 +180,10 @@ def _is_valid_row(row: dict) -> bool:
         val = row.get(field_name, "") or ""
         if any(ind in val for ind in config.HTML5_REJECT_INDICATORS):
             return False
+    # Reject Google Text ads — no visual value, user rule.
+    if (row.get("Platform") == "Google Ads"
+            and (row.get("Ad Format", "").upper() in ("TEXT",))):
+        return False
     return True
 
 

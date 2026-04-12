@@ -1,0 +1,31 @@
+# Python code — not needed for static site serving
+*.py
+*.pyc
+__pycache__/
+pipeline/
+scrapers/
+_deprecated/
+backups/
+staging/
+logs/
+metrics/
+v2/
+debug_responses/
+debug_firecrawl/
+
+# Data files that aren't served
+*.json
+!vercel.json
+*.log
+*.rtf
+
+# Git and config
+.git/
+.gitignore
+.claude/
+.env
+.env*.local
+
+# Large media already cached on Vercel CDN — uncomment if re-uploading
+# public/meta_images/
+# public/google_videos/
