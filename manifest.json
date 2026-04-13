@@ -1,16 +1,24 @@
 {
   "batch_id": "migration_image_preview_20260409_225009_64ab36ce",
-  "row_count": 2873,
-  "sha256": "6d9b7451227261ffb8f3e188c520e3cbdc016967f2e2f419f818d86e58ca5225",
-  "timestamp": "2026-04-12T09:51:27.313581+00:00",
+  "row_count": 2679,
+  "sha256": "9c6eed175a334758e1b47327882749ae7221b1c1c7f22a8bcb8b9d81166414ba",
+  "timestamp": "2026-04-13T15:26:34.134687",
   "preview_validator_ran": false,
   "schema_version": 2,
   "history": [
+    {
+      "batch_id": "purge_nopreview_20260413",
+      "row_count": 2679,
+      "sha256": "9c6eed175a334758e1b47327882749ae7221b1c1c7f22a8bcb8b9d81166414ba",
+      "timestamp": "2026-04-13T15:26:34.134687",
+      "note": "purge: remove 194 no-preview Global Google Ads"
+    },
     {
       "batch_id": "recovery_20260409_211510_b74955cf",
       "row_count": 3090,
       "sha256": "99517dcc72edb43ca5962d603c09c5b67a778618af1c23c86397917dc8a87e2c",
       "timestamp": "2026-04-09T17:15:10.922080+00:00"
     }
-  ]
+  ],
+  "latest_batch_id": "purge_nopreview_20260413"
 }
