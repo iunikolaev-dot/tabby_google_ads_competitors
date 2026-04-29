@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
 <title>Competitor Ad Intelligence — Google Ads Transparency</title>
 <style>
 :root{--bg:#0f1117;--card:#1a1d27;--border:#2a2d3a;--text:#e4e6eb;--muted:#8b8fa3;--accent:#6366f1;--accent-l:#818cf8;--green:#22c55e;--red:#ef4444;--yellow:#eab308;--blue:#3b82f6}
@@ -25,6 +26,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .badge-image{background:rgba(59,130,246,.15);color:#60a5fa}
 .badge-text{background:rgba(234,179,8,.15);color:#facc15}
 .badge-new{background:rgba(34,197,94,.12);color:var(--green)}
+.badge-inactive{background:rgba(139,143,163,.12);color:#8b8fa3}
 .badge-sa{background:rgba(34,197,94,.12);color:#4ade80}
 .badge-ae{background:rgba(99,102,241,.12);color:#a5b4fc}
 .view-toggle{display:flex;gap:4px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:3px}
@@ -34,9 +36,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .ad-card{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;transition:border-color .2s}
 .ad-card:hover{border-color:var(--accent)}
 .ad-card .media{width:100%;height:220px;background:#12141c;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;cursor:pointer}
+.ad-card .media iframe{width:100%;height:100%;border:none}
 .ad-card .media img{max-width:100%;max-height:100%;object-fit:contain}
 .ad-card .media .no-preview{color:var(--muted);font-size:13px;text-align:center;padding:16px}
 .ad-card .media video{max-width:100%;max-height:100%;object-fit:contain}
+.lazy-spinner{width:24px;height:24px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto}
+@keyframes spin{to{transform:rotate(360deg)}}
 .play-overlay{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:48px;height:48px;background:rgba(0,0,0,.6);border-radius:50%;display:flex;align-items:center;justify-content:center;pointer-events:none}
 .play-overlay::after{content:'';border-left:16px solid #fff;border-top:10px solid transparent;border-bottom:10px solid transparent;margin-left:4px}
 .ad-card .info{padding:14px}
@@ -78,21 +83,24 @@ h3.section{margin-bottom:10px;font-size:15px;font-weight:600}
     <div class="meta" id="lastUpdated"></div>
   </div>
   <div class="stats-row" id="statsRow"></div>
-  <h3 class="section">Competitor Breakdown</h3>
-  <div class="breakdown" id="breakdown"></div>
   <div class="filters">
     <div><label>Category</label><select id="fCat"><option value="">All</option><option value="GCC">GCC</option><option value="Global">Global</option></select></div>
     <div><label>Competitor</label><select id="fComp"><option value="">All</option></select></div>
     <div><label>Region</label><select id="fReg"><option value="">All</option><option value="SA">SA</option><option value="AE">AE</option><option value="Global">Global</option></select></div>
     <div><label>Format</label><select id="fFmt"><option value="">All</option><option value="Video">Video</option><option value="Image">Image</option><option value="Text">Text</option></select></div>
     <div><label>Platform</label><select id="fPlat"><option value="">All</option><option value="Google Ads">Google Ads</option><option value="Meta Ads">Meta Ads</option></select></div>
+    <div><label>Status</label><select id="fStatus"><option value="">All</option><option value="Active" selected>Active</option><option value="Inactive">Inactive</option></select></div>
+    <div><label>From</label><input type="date" id="fFrom"></div>
+    <div><label>To</label><input type="date" id="fTo"></div>
     <div><label>Search</label><input type="text" id="fSearch" placeholder="Search ads..."></div>
+    <div><label>&nbsp;</label><a href="/test-analyze.html" style="display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:#fff;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap;transition:background .2s" onmouseover="this.style.background='var(--accent-l)'" onmouseout="this.style.background='var(--accent)'">AI Analysis</a></div>
     <div style="margin-left:auto"><label>View</label><div class="view-toggle"><button class="active" id="btnGrid">Grid</button><button id="btnTable">Table</button></div></div>
   </div>
   <div style="margin-bottom:12px;font-size:13px;color:var(--muted)">Showing <strong id="cnt" style="color:var(--text)">0</strong> ads</div>
   <div class="grid" id="gridView"></div>
+  <div class="breakdown" id="breakdown" style="margin-top:32px"></div>
   <div class="table-wrap hidden" id="tableView"><table><thead><tr>
-    <th data-k="Competitor Name">Competitor</th><th data-k="Platform">Platform</th><th data-k="Region">Region</th><th data-k="Ad Format">Format</th>
+    <th data-k="Competitor Name">Competitor</th><th data-k="Platform">Platform</th><th data-k="Region">Region</th><th data-k="Ad Format">Format</th><th data-k="Status">Status</th>
     <th data-k="Started Running">Started</th><th data-k="Last Shown">Last Shown</th><th>Preview</th><th>Image</th><th>Video</th><th>Link</th><th data-k="Creative ID">Creative ID</th>
   </tr></thead><tbody id="tBody"></tbody></table></div>
 </div>
@@ -115,11 +123,27 @@ function cleanImageUrl(raw) {
   if (m) raw = m[1];
   // Skip non-image URLs
   if (raw.includes('sadbundle') || raw.endsWith('.html') || raw.endsWith('.js')) return '';
-  // Google Ads images
+  // Google Ads images (both /simgad/ and /archive/simgad/)
   if (raw.includes('simgad') || raw.includes('tpc.googlesyndication')) return raw;
+  // YouTube thumbnails (video ad previews)
+  if (raw.includes('ytimg.com')) return raw;
+  // Google-hosted images (lh3)
+  if (raw.includes('lh3.googleusercontent.com')) return raw;
+  // 2mdn.net hosted images (Cash App, etc.)
+  if (raw.includes('2mdn.net')) return raw;
+  // gstatic.com hosted images
+  if (raw.includes('gstatic.com')) return raw;
   // Meta Ads images (Facebook CDN)
-  if (raw.includes('fbcdn.net') || raw.includes('facebook.com')) return raw;
+  if (raw.includes('fbcdn.net') || raw.includes('facebook.com') || raw.includes('scontent')) return raw;
+  // Any direct image file URL
+  if (/\.(png|jpg|jpeg|gif|webp)(\?|$)/i.test(raw)) return raw;
   return '';
+}
+function isVideoUrlExpired(url) {
+  if (!url) return true;
+  const m = url.match(/expire=(\d+)/);
+  if (!m) return false;
+  return parseInt(m[1]) * 1000 < Date.now();
 }
 function cleanVideoUrl(raw) {
   if (!raw) return '';
@@ -153,13 +177,17 @@ function closeLightbox() {
 
 // ── Filter & sort ──
 function getFiltered(){
-  const cat=document.getElementById('fCat').value,comp=document.getElementById('fComp').value,reg=document.getElementById('fReg').value,fmt=document.getElementById('fFmt').value,plat=document.getElementById('fPlat').value,q=document.getElementById('fSearch').value.toLowerCase();
+  const cat=document.getElementById('fCat').value,comp=document.getElementById('fComp').value,reg=document.getElementById('fReg').value,fmt=document.getElementById('fFmt').value,plat=document.getElementById('fPlat').value,status=document.getElementById('fStatus').value,from=document.getElementById('fFrom').value,to=document.getElementById('fTo').value,q=document.getElementById('fSearch').value.toLowerCase();
   return ADS_DATA.filter(a=>{
     if(cat&&(a['Category']||'GCC')!==cat)return false;
     if(comp&&a['Competitor Name']!==comp)return false;
     if(reg&&a['Region']!==reg)return false;
     if(fmt&&a['Ad Format']!==fmt)return false;
     if(plat&&(a['Platform']||'Google Ads')!==plat)return false;
+    if(status&&(a['Status']||'Active')!==status)return false;
+    const ls=a['Last Shown']||'';
+    if(from&&ls&&ls<from)return false;
+    if(to&&ls&&ls>to)return false;
     if(q&&!Object.values(a).join(' ').toLowerCase().includes(q))return false;
     return true;
   }).sort((a,b)=>{const va=a[sortKey]||'',vb=b[sortKey]||'';return va<vb?sortDir:va>vb?-sortDir:0});
@@ -174,14 +202,16 @@ function renderStats(){
   const n=ADS_DATA.filter(a=>a['New This Week']==='NEW').length;
   const gAds=ADS_DATA.filter(a=>(a['Platform']||'Google Ads')==='Google Ads').length;
   const mAds=ADS_DATA.filter(a=>a['Platform']==='Meta Ads').length;
+  const act=ADS_DATA.filter(a=>(a['Status']||'Active')==='Active').length;
+  const inact=t-act;
   const d=[...new Set(ADS_DATA.map(a=>a['Date Collected']).filter(Boolean))].sort().reverse();
   document.getElementById('statsRow').innerHTML=`
     <div class="stat-card"><div class="label">Total Ads</div><div class="value">${t}</div><div class="sub">${c} competitors</div></div>
+    <div class="stat-card"><div class="label">Active</div><div class="value" style="color:var(--green)">${act}</div><div class="sub">${inact} inactive</div></div>
     <div class="stat-card"><div class="label">Google Ads</div><div class="value" style="color:#60a5fa">${gAds}</div><div class="sub">${t?(gAds/t*100).toFixed(0):0}%</div></div>
     <div class="stat-card"><div class="label">Meta Ads</div><div class="value" style="color:#a78bfa">${mAds}</div><div class="sub">${t?(mAds/t*100).toFixed(0):0}%</div></div>
     <div class="stat-card"><div class="label">Video</div><div class="value" style="color:#f87171">${v}</div><div class="sub">${t?(v/t*100).toFixed(0):0}%</div></div>
     <div class="stat-card"><div class="label">Image</div><div class="value" style="color:#60a5fa">${im}</div><div class="sub">${t?(im/t*100).toFixed(0):0}%</div></div>
-    <div class="stat-card"><div class="label">Text</div><div class="value" style="color:#facc15">${tx}</div><div class="sub">${t?(tx/t*100).toFixed(0):0}%</div></div>
     <div class="stat-card"><div class="label">New This Week</div><div class="value" style="color:var(--green)">${n}</div><div class="sub">first seen</div></div>`;
   document.getElementById('lastUpdated').textContent=d[0]?'Last scraped: '+d[0]:'';
 }
@@ -205,42 +235,60 @@ function renderBreakdown(){
       <div style="margin-top:6px;font-size:13px;font-weight:600">${c.total} total</div>
     </div>`}).join('')}
   document.getElementById('breakdown').innerHTML=
-    '<h3 class="section" style="grid-column:1/-1;margin-top:8px">GCC Competitors</h3>'+renderCards(gcc)+
-    '<h3 class="section" style="grid-column:1/-1;margin-top:16px">Global Competitors</h3>'+renderCards(global);
+    '<h3 class="section" style="grid-column:1/-1;margin-top:0">GCC</h3>'+renderCards(gcc)+
+    '<h3 class="section" style="grid-column:1/-1;margin-top:16px">Global</h3>'+renderCards(global);
 }
 
 function renderGrid(ads){
   document.getElementById('gridView').innerHTML=ads.map(ad=>{
-    const img=cleanImageUrl(ad['Image URL']);
+    const localVideo=ad['Local Video']||'';
+    const img=ad['Local Image']||cleanImageUrl(ad['Image URL']);
     const vid=cleanVideoUrl(ad['Video URL']);
+    const vidOk=vid&&!isVideoUrlExpired(vid);
     const preview=ad['Ad Preview URL']||'';
     const isNew=ad['New This Week']==='NEW';
     let media='';
     const fmtIcon = ad['Ad Format']==='Video' ? '\u25B6' : ad['Ad Format']==='Image' ? '\u{1F5BC}' : '\u{1F4DD}';
     const fmtColor = ad['Ad Format']==='Video' ? '#f87171' : ad['Ad Format']==='Image' ? '#60a5fa' : '#facc15';
-    if(img){
-      media=`<img src="${img}" alt="Ad" onerror="this.parentElement.innerHTML=\`<div class='no-preview'><div style='font-size:32px;margin-bottom:6px'>${fmtIcon}</div><div>${ad['Ad Format']} ad</div><div style=margin-top:6px;font-size:11px>Image unavailable</div></div>\`">`;
-      if(ad['Ad Format']==='Video') media+=`<div class="play-overlay"></div>`;
-    } else if(vid && ad['Ad Format']==='Video'){
-      media=`<video src="${vid}" muted preload="metadata" onloadeddata="this.currentTime=1" onerror="this.outerHTML=\`<div class='no-preview'><div style='font-size:32px;margin-bottom:6px'>${fmtIcon}</div><div>Video ad</div></div>\`"></video><div class="play-overlay"></div>`;
+    const isVideo=ad['Ad Format']==='Video';
+    if(localVideo){
+      // Show local MP4 video — autoplay first frame as poster, play on hover
+      media=`<video src="${localVideo}" muted loop preload="metadata" playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0" style="width:100%;height:100%;object-fit:contain;background:#000"></video>`;
+    } else if(img){
+      // Show image thumbnail — for video ads, add play overlay
+      media=`<img src="${img}" alt="Ad" onerror="this.parentElement.innerHTML='<div class=no-preview><div style=font-size:32px;margin-bottom:6px>${fmtIcon}</div><div>${ad['Ad Format']} ad</div></div>'">`;
+      if(isVideo) media+=`<div class="play-overlay"></div>`;
+    } else if(ad['Screenshot']){
+      // Show screenshot taken from Transparency Center
+      media=`<img src="${ad['Screenshot']}" alt="Ad screenshot" onerror="this.parentElement.innerHTML='<div class=no-preview><div style=font-size:32px;margin-bottom:6px>${fmtIcon}</div><div>${ad['Ad Format']} ad</div></div>'">`;
+      if(isVideo) media+=`<div class="play-overlay"></div>`;
+    } else if(ad['Embed URL'] && (ad['Embed URL'].includes('sadbundle') || ad['Embed URL'].includes('content.html'))){
+      // Iframe sadbundle or content.html URLs (render properly)
+      media=`<iframe src="${ad['Embed URL']}" loading="lazy" sandbox="allow-scripts allow-same-origin" scrolling="no"></iframe>`;
     } else {
       const viewLabel=ad['Platform']==='Meta Ads'?'View on Meta':'View on Google';
-      media=`<div class="no-preview"><div style="font-size:36px;margin-bottom:8px;color:${fmtColor}">${fmtIcon}</div><div style="font-size:14px;font-weight:500">${ad['Ad Format']} Ad</div><div style="margin-top:8px;font-size:11px"><a href="${preview}" target="_blank" style="color:var(--accent-l);text-decoration:none">${viewLabel} &rarr;</a></div></div>`;
+      media=`<div class="no-preview" style="height:${ad['Status']==='Active'?'220':'80'}px"><div style="font-size:${ad['Status']==='Active'?'36':'12'}px;${ad['Status']==='Active'?'margin-bottom:8px;color:'+fmtColor:'color:var(--muted)'}">${ad['Status']==='Active'?fmtIcon:''}</div>${ad['Status']==='Active'?'<div style="font-size:14px;font-weight:500">'+ad['Ad Format']+' Ad</div>':''}<div style="margin-top:8px;font-size:11px"><a href="${preview}" target="_blank" style="color:var(--accent-l);text-decoration:none">${viewLabel} &rarr;</a></div></div>`;
     }
+    // Click handler: local videos open in lightbox; videos without local file open preview URL
+    const clickAction=localVideo
+      ?`onclick="openLightbox('','${localVideo}','')"`
+      :(isVideo
+        ?`onclick="window.open('${preview.replace(/'/g,"\\'")}','_blank')"`
+        :(img?`onclick="openLightbox('${img}','','${preview}')"`:`onclick="window.open('${preview.replace(/'/g,"\\'")}','_blank')"`));
     return `<div class="ad-card">
-      <div class="media" onclick="openLightbox('${img}','${vid}','${preview}')">${media}</div>
+      <div class="media" ${clickAction}>${media}</div>
       <div class="info">
         <div class="top-row"><span class="competitor">${ad['Competitor Name']}</span>${rb(ad['Region'])}</div>
-        <div class="tags">${fb(ad['Ad Format'])}${ad['Platform']==='Meta Ads'?'<span class="badge" style="background:rgba(167,139,250,.15);color:#a78bfa">META</span>':'<span class="badge" style="background:rgba(59,130,246,.15);color:#60a5fa">GOOGLE</span>'}${ad['Category']==='Global'?' <span class="badge" style="background:rgba(168,85,247,.15);color:#c084fc">GLOBAL</span>':''}${isNew?' <span class="badge badge-new">NEW</span>':''}</div>
+        <div class="tags">${fb(ad['Ad Format'])}${ad['Platform']==='Meta Ads'?'<span class="badge" style="background:rgba(167,139,250,.15);color:#a78bfa">META</span>':'<span class="badge" style="background:rgba(59,130,246,.15);color:#60a5fa">GOOGLE</span>'}${ad['Category']==='Global'?' <span class="badge" style="background:rgba(168,85,247,.15);color:#c084fc">GLOBAL</span>':''}${isNew?' <span class="badge badge-new">NEW</span>':''}${(ad['Status']||'Active')==='Inactive'?' <span class="badge badge-inactive">INACTIVE</span>':''}</div>
         <div class="details">${ad['Started Running']?'Started: '+ad['Started Running']+' | ':''}Last shown: ${ad['Last Shown']||'N/A'}<br>${ad['Advertiser Name (Transparency Center)']||''}<br>
-          <a href="${preview}" target="_blank">${ad['Platform']==='Meta Ads'?'Ad Library':'Transparency Center'}</a>${vid?' | <a href="'+vid+'" target="_blank">Video</a>':''}</div>
+          <a href="${preview}" target="_blank">${ad['Platform']==='Meta Ads'?'Ad Library':'Transparency Center'}</a>${isVideo&&vid?' | <a href="'+preview+'" target="_blank">Video</a>':''}</div>
       </div></div>`;
   }).join('');
 }
 
 function renderTable(ads){
   document.getElementById('tBody').innerHTML=ads.map(ad=>{
-    const img=cleanImageUrl(ad['Image URL']);
+    const img=ad['Local Image']||cleanImageUrl(ad['Image URL']);
     const vid=cleanVideoUrl(ad['Video URL']);
     const preview=ad['Ad Preview URL']||'';
     const isNew=ad['New This Week']==='NEW';
@@ -248,7 +296,7 @@ function renderTable(ads){
     const platBadge=plat==='Meta Ads'?'<span class="badge" style="background:rgba(167,139,250,.15);color:#a78bfa">META</span>':'<span class="badge" style="background:rgba(59,130,246,.15);color:#60a5fa">GOOGLE</span>';
     return `<tr>
       <td><strong>${ad['Competitor Name']}</strong>${isNew?' <span class="badge badge-new">NEW</span>':''}</td>
-      <td>${platBadge}</td><td>${rb(ad['Region'])}</td><td>${fb(ad['Ad Format'])}</td><td>${ad['Started Running']||''}</td><td>${ad['Last Shown']||''}</td>
+      <td>${platBadge}</td><td>${rb(ad['Region'])}</td><td>${fb(ad['Ad Format'])}</td><td>${(ad['Status']||'Active')==='Active'?'<span style="color:var(--green)">Active</span>':'<span style="color:var(--muted)">Inactive</span>'}</td><td>${ad['Started Running']||''}</td><td>${ad['Last Shown']||''}</td>
       <td>${img?`<img class="thumb" src="${img}" onclick="openLightbox('${img}','','')" style="cursor:zoom-in" onerror="this.style.display='none'">`:`<a href="${preview}" target="_blank" style="font-size:11px">Preview</a>`}</td>
       <td>${img?`<a href="${img}" target="_blank">View</a>`:'-'}</td>
       <td>${vid?`<a href="${vid}" target="_blank">Play</a>`:'-'}</td>
@@ -263,12 +311,13 @@ function render(){const ads=getFiltered();document.getElementById('cnt').textCon
 renderStats();renderBreakdown();
 const sel=document.getElementById('fComp');[...new Set(ADS_DATA.map(a=>a['Competitor Name']))].sort().forEach(n=>{const o=document.createElement('option');o.value=n;o.textContent=n;sel.appendChild(o)});
 render();
-['fCat','fComp','fReg','fFmt','fPlat'].forEach(id=>document.getElementById(id).addEventListener('change',render));
+['fCat','fComp','fReg','fFmt','fPlat','fStatus','fFrom','fTo'].forEach(id=>document.getElementById(id).addEventListener('change',render));
 document.getElementById('fSearch').addEventListener('input',render);
 document.getElementById('btnGrid').addEventListener('click',function(){this.classList.add('active');document.getElementById('btnTable').classList.remove('active');document.getElementById('gridView').classList.remove('hidden');document.getElementById('tableView').classList.add('hidden')});
 document.getElementById('btnTable').addEventListener('click',function(){this.classList.add('active');document.getElementById('btnGrid').classList.remove('active');document.getElementById('tableView').classList.remove('hidden');document.getElementById('gridView').classList.add('hidden')});
 document.querySelectorAll('th[data-k]').forEach(th=>th.addEventListener('click',()=>{const k=th.dataset.k;if(sortKey===k)sortDir*=-1;else{sortKey=k;sortDir=-1}render()}));
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeLightbox()});
+
 </script>
 </body>
 </html>

@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
+<title>AI Ad Analysis — Test</title>
+<style>
+:root{--bg:#0f1117;--card:#1a1d27;--border:#2a2d3a;--text:#e4e6eb;--muted:#8b8fa3;--accent:#6366f1;--accent-l:#818cf8;--green:#22c55e;--yellow:#eab308}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;padding:24px}
+.container{max-width:1200px;margin:0 auto}
+h1{font-size:24px;font-weight:700;margin-bottom:4px} h1 span{color:var(--accent-l)}
+.subtitle{color:var(--muted);font-size:13px;margin-bottom:24px}
+.controls{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;align-items:flex-end}
+.controls label{font-size:12px;color:var(--muted);display:block;margin-bottom:3px}
+.controls select,.controls input[type="date"]{background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;min-width:140px}
+.controls select:focus,.controls input:focus{border-color:var(--accent)}
+.btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:14px;font-weight:600;cursor:pointer;transition:opacity .2s}
+.btn:hover{opacity:.85}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+
+.summary{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:20px}
+.summary h3{font-size:15px;font-weight:600;margin-bottom:8px}
+.summary .stats{display:flex;gap:20px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.summary .stats b{color:var(--text)}
+
+.selection-info{background:var(--card);border:1px solid var(--accent);border-radius:12px;padding:16px 18px;margin-bottom:20px;display:none}
+.selection-info .sel-header{display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+.selection-info .sel-header span{font-size:13px;color:var(--muted)}
+.selection-info .sel-header b{color:var(--accent-l);font-size:15px}
+.slider-wrap{display:flex;align-items:center;gap:10px;flex:1;min-width:200px}
+.slider-wrap input[type="range"]{flex:1;accent-color:var(--accent)}
+.slider-wrap .slider-val{font-size:14px;font-weight:700;color:var(--accent-l);min-width:24px;text-align:center}
+.sel-note{font-size:12px;color:var(--muted);margin-bottom:8px}
+
+.preview-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-top:8px}
+.preview-item{position:relative;border-radius:8px;overflow:hidden;border:2px solid transparent;transition:border-color .2s}
+.preview-item.selected{border-color:var(--accent)}
+.preview-item.dimmed{opacity:.35}
+.preview-item img{width:100%;height:85px;object-fit:cover;display:block}
+.preview-item .badge{position:absolute;top:4px;left:4px;background:var(--accent);color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px}
+.preview-item .days{position:absolute;bottom:4px;right:4px;background:rgba(0,0,0,.7);color:var(--text);font-size:10px;padding:1px 5px;border-radius:3px}
+
+.result{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;margin-top:20px;display:none;overflow-x:auto}
+.result.show{display:block}
+.result h2{font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.result .content{font-size:14px;line-height:1.7}
+.result .content h1{font-size:17px;font-weight:700;margin:20px 0 8px;color:var(--accent-l)}
+.result .content h2{font-size:15px;font-weight:700;margin:16px 0 6px;color:var(--accent-l)}
+.result .content h3{font-size:14px;font-weight:700;margin:14px 0 4px;color:var(--accent-l)}
+.result .content h4{font-size:13px;font-weight:700;margin:12px 0 4px;color:var(--text)}
+.result .content p{margin-bottom:10px}
+.result .content ul,.result .content ol{margin:8px 0 12px 20px}
+.result .content li{margin-bottom:4px}
+.result .content strong{color:#fff}
+.result .content code{background:rgba(99,102,241,.15);padding:1px 5px;border-radius:4px;font-size:12px}
+.result .content table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px;table-layout:fixed}
+.result .content th{background:var(--border);padding:6px 6px;text-align:left;font-weight:600;font-size:11px;overflow:hidden;text-overflow:ellipsis}
+.result .content td{padding:6px 6px;border-bottom:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+.result .content tr:hover td{background:rgba(99,102,241,.05)}
+.result .content td img.td-preview{width:60px;height:60px;object-fit:cover;border-radius:4px;display:block}
+/* Column widths for the 12-col image ads table */
+.result .content table th:nth-child(1){width:55px} /* Ad label */
+.result .content table th:nth-child(2){width:70px} /* Preview */
+.result .content table th:nth-child(3){width:50px} /* Platform fit */
+.result .content table th:nth-child(4){width:55px} /* Verdict */
+.result .content table th:nth-child(5){width:40px} /* Caught my eye */
+.result .content table th:nth-child(6),
+.result .content table th:nth-child(7),
+.result .content table th:nth-child(8),
+.result .content table th:nth-child(9),
+.result .content table th:nth-child(10){width:38px} /* Score columns */
+.result .content table th:nth-child(11){width:50px} /* Confidence */
+.result .content table th:nth-child(12){width:auto} /* Key finding - takes remaining space */
+.result .content a{color:var(--accent-l);text-decoration:none}
+.result .content a:hover{text-decoration:underline}
+.result .content details{background:rgba(99,102,241,.06);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin:10px 0}
+.result .content details[open]{padding-bottom:16px}
+.result .content summary{cursor:pointer;font-size:14px;font-weight:600;color:var(--accent-l);list-style:none;padding:2px 0}
+.result .content summary::-webkit-details-marker{display:none}
+.result .content summary::before{content:'+ ';color:var(--muted)}
+.result .content details[open] summary::before{content:'- '}
+
+.spinner{display:inline-block;width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--accent-l);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.back{color:var(--accent-l);text-decoration:none;font-size:13px;display:inline-block;margin-bottom:16px}
+.back:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="container">
+  <a class="back" href="/dashboard.html">&larr; Back to Dashboard</a>
+  <h1>AI <span>Ad Analysis</span></h1>
+  <div class="subtitle">Select a competitor and platform to get AI-powered creative insights</div>
+
+  <div class="controls">
+    <div>
+      <label>Competitor</label>
+      <select id="selComp"><option value="">Select competitor...</option></select>
+    </div>
+    <div>
+      <label>Platform</label>
+      <select id="selPlat"><option value="">All Platforms</option><option value="Google Ads">Google Ads</option><option value="Meta Ads">Meta Ads</option></select>
+    </div>
+    <div>
+      <label>Format</label>
+      <select id="selFormat"><option value="">All Formats</option><option value="Image">Images only</option><option value="Video">Videos only</option></select>
+    </div>
+    <div>
+      <label>From</label>
+      <input type="date" id="dateFrom">
+    </div>
+    <div>
+      <label>To</label>
+      <input type="date" id="dateTo">
+    </div>
+  </div>
+
+  <div class="summary" id="summary" style="display:none">
+    <h3 id="sumTitle"></h3>
+    <div class="stats" id="sumStats"></div>
+  </div>
+
+  <div class="selection-info" id="selectionInfo">
+    <div class="sel-header">
+      <span>Analyze top</span>
+      <div class="slider-wrap">
+        <input type="range" id="adSlider" min="3" max="20" value="10">
+        <span class="slider-val" id="sliderVal">10</span>
+      </div>
+      <span>longest-running ads (best performers)</span>
+      <button class="btn" id="btnAnalyze" disabled>Analyze with AI</button>
+    </div>
+    <div class="sel-note" id="selNote"></div>
+    <div class="preview-grid" id="previewGrid"></div>
+  </div>
+
+  <div class="result" id="result">
+    <h2 id="resTitle"></h2>
+    <div class="content" id="resContent"></div>
+  </div>
+</div>
+
+<script src="ads_data.js"></script>
+<script>
+const selComp = document.getElementById('selComp');
+const selPlat = document.getElementById('selPlat');
+const selFormat = document.getElementById('selFormat');
+const dateFrom = document.getElementById('dateFrom');
+const dateTo = document.getElementById('dateTo');
+const btnAnalyze = document.getElementById('btnAnalyze');
+const summaryEl = document.getElementById('summary');
+const selectionInfo = document.getElementById('selectionInfo');
+const adSlider = document.getElementById('adSlider');
+const sliderVal = document.getElementById('sliderVal');
+const result = document.getElementById('result');
+
+// Populate competitor dropdown
+const names = [...new Set(ADS_DATA.map(a => a['Competitor Name']))].sort();
+names.forEach(n => {
+  const o = document.createElement('option');
+  o.value = n; o.textContent = n;
+  selComp.appendChild(o);
+});
+
+let rankedAds = []; // sorted by run duration
+
+function getFiltered() {
+  const comp = selComp.value;
+  const plat = selPlat.value;
+  const fmt = selFormat.value;
+  const from = dateFrom.value;
+  const to = dateTo.value;
+  if (!comp) return [];
+  return ADS_DATA.filter(a => {
+    if (a['Competitor Name'] !== comp) return false;
+    if (plat && (a['Platform'] || 'Google Ads') !== plat) return false;
+    if (fmt && a['Ad Format'] !== fmt) return false;
+    const adDate = a['Started Running'] || a['Last Shown'] || '';
+    if (from && adDate < from) return false;
+    if (to && adDate > to) return false;
+    return true;
+  });
+}
+
+function rankAds(ads) {
+  return ads.map(a => {
+    const start = a['Started Running'] || a['Last Shown'] || '';
+    const end = a['Last Shown'] || '';
+    let days = 0;
+    if (start && end) {
+      days = Math.max(0, Math.round((new Date(end) - new Date(start)) / 86400000));
+    }
+    return { ...a, _days: days };
+  }).sort((a, b) => b._days - a._days);
+}
+
+function updateUI() {
+  const ads = getFiltered();
+  rankedAds = rankAds(ads);
+
+  if (ads.length === 0) {
+    summaryEl.style.display = 'none';
+    selectionInfo.style.display = 'none';
+    btnAnalyze.disabled = true;
+    return;
+  }
+
+  const comp = selComp.value;
+  const plat = selPlat.value || 'All Platforms';
+  const videos = ads.filter(a => a['Ad Format'] === 'Video').length;
+  const images = ads.filter(a => a['Ad Format'] === 'Image').length;
+  const dates = ads.map(a => a['Started Running'] || a['Last Shown']).filter(Boolean).sort();
+
+  document.getElementById('sumTitle').textContent = `${comp} — ${plat}`;
+  document.getElementById('sumStats').innerHTML = `
+    <span><b>${ads.length}</b> total ads</span>
+    <span><b>${videos}</b> video</span>
+    <span><b>${images}</b> image</span>
+    <span>Date range: <b>${dates[0] || 'N/A'}</b> to <b>${dates[dates.length-1] || 'N/A'}</b></span>`;
+  summaryEl.style.display = 'block';
+
+  // Update slider max
+  adSlider.max = Math.min(rankedAds.length, 20);
+  if (parseInt(adSlider.value) > rankedAds.length) adSlider.value = Math.min(rankedAds.length, 10);
+  selectionInfo.style.display = 'block';
+  btnAnalyze.disabled = false;
+  updateSelection();
+}
+
+function updateSelection() {
+  const count = parseInt(adSlider.value);
+  sliderVal.textContent = count;
+
+  const selected = rankedAds.slice(0, count);
+  const selVideos = selected.filter(a => a['Ad Format'] === 'Video').length;
+  const selImages = selected.filter(a => a['Ad Format'] === 'Image').length;
+  const selImgWithPreview = selected.filter(a => a['Local Image'] || a['Image URL']).length;
+
+  document.getElementById('selNote').textContent =
+    `${count} of ${rankedAds.length} ads will be analyzed (${selVideos} video, ${selImages} image, ${selImgWithPreview} with visual preview). Sorted by run duration — longest first.`;
+
+  // Show preview grid with selected/dimmed states
+  const grid = document.getElementById('previewGrid');
+  const allWithImages = rankedAds.filter(a => a['Local Image'] || a['Image URL']);
+  // Show up to 20 thumbnails
+  const toShow = allWithImages.slice(0, 20);
+  grid.innerHTML = toShow.map((a, i) => {
+    const rank = rankedAds.indexOf(a);
+    const isSelected = rank < count;
+    return `<div class="preview-item ${isSelected ? 'selected' : 'dimmed'}">
+      <img src="${a['Local Image']||a['Image URL']}" onerror="this.parentElement.style.display='none'" alt="Ad">
+      ${isSelected ? `<span class="badge">#${rank+1}</span>` : ''}
+      <span class="days">${a._days}d</span>
+    </div>`;
+  }).join('');
+}
+
+selComp.addEventListener('change', updateUI);
+selPlat.addEventListener('change', updateUI);
+selFormat.addEventListener('change', updateUI);
+dateFrom.addEventListener('change', updateUI);
+dateTo.addEventListener('change', updateUI);
+adSlider.addEventListener('input', updateSelection);
+
+// Analyze
+btnAnalyze.addEventListener('click', async () => {
+  const count = parseInt(adSlider.value);
+  const selected = rankedAds.slice(0, count);
+  if (selected.length === 0) return;
+
+  const comp = selComp.value;
+  const plat = selPlat.value || 'All Platforms';
+
+  btnAnalyze.disabled = true;
+  btnAnalyze.innerHTML = '<span class="spinner"></span> Analyzing...';
+  result.classList.add('show');
+  document.getElementById('resTitle').innerHTML = `<span class="spinner"></span> Analyzing ${comp}...`;
+  document.getElementById('resContent').innerHTML = '<p style="color:var(--muted)">GPT-5.4 Nano is analyzing ads, creatives, and patterns. This may take 15-45 seconds...</p>';
+
+  const videos = selected.filter(a => a['Ad Format'] === 'Video');
+  const images = selected.filter(a => a['Ad Format'] === 'Image');
+
+  // Build detailed text summary for the AI
+  let adsSummary = `## Campaign Overview
+- **Competitor**: ${comp}
+- **Total ads selected for analysis**: ${selected.length}
+- **Video**: ${videos.length}, **Image**: ${images.length}
+- **Platform**: ${plat}
+- **Website**: ${selected[0]['Competitor Website'] || 'N/A'}
+- **Selection method**: Top ${count} longest-running ads (longest running = likely best performers)
+
+## Ads to analyze (sorted by run duration)
+`;
+  selected.forEach((a, i) => {
+    adsSummary += `\n### Ad ${i + 1} — ${a['Ad Format']}
+- Running: ${a._days} days (${a['Started Running'] || '?'} to ${a['Last Shown'] || '?'})`;
+    if (a['Active Status']) adsSummary += `\n- Status: ${a['Active Status']}`;
+    if (a['Landing Page / Destination URL']) adsSummary += `\n- Landing page: ${a['Landing Page / Destination URL']}`;
+    if (a['Region']) adsSummary += `\n- Region/Publishers: ${a['Region']}`;
+    if (a['Image URL']) adsSummary += `\n- Preview: ${a['Image URL']}`;
+    if (a['Video URL']) adsSummary += `\n- Video: ${a['Video URL']}`;
+  });
+
+  // Landing page patterns
+  const landingPages = [...new Set(selected.map(a => a['Landing Page / Destination URL']).filter(Boolean))];
+  if (landingPages.length > 0) {
+    adsSummary += `\n\n## Landing Pages Used (${landingPages.length} unique)\n`;
+    landingPages.forEach(lp => { adsSummary += `- ${lp}\n`; });
+  }
+
+  // Collect image URLs for visual analysis
+  const sampleImages = [...new Set(selected.filter(a => a['Local Image'] || a['Image URL']).map(a => a['Local Image'] ? window.location.origin + a['Local Image'] : a['Image URL']))].slice(0, 8);
+
+  try {
+    const resp = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        competitorName: comp,
+        platform: plat,
+        ads: adsSummary,
+        imageUrls: sampleImages,
+      }),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      let errMsg;
+      try { errMsg = JSON.parse(errText).error; } catch(e) { errMsg = errText; }
+      throw new Error(errMsg || `HTTP ${resp.status}`);
+    }
+
+    const data = await resp.json();
+    document.getElementById('resTitle').textContent = `Analysis: ${comp} (${plat})`;
+    document.getElementById('resContent').innerHTML = markdownToHtml(data.analysis);
+  } catch (err) {
+    document.getElementById('resTitle').textContent = 'Analysis Failed';
+    document.getElementById('resContent').innerHTML = `<p style="color:#f87171">Error: ${err.message}</p>`;
+  }
+
+  btnAnalyze.disabled = false;
+  btnAnalyze.textContent = 'Analyze with AI';
+});
+
+// Markdown → HTML with table and <details> support
+function markdownToHtml(md) {
+  // Pass through <details>, <summary>, </details>, </summary> tags as-is
+  const lines = md.split('\n');
+  let html = '';
+  let inTable = false;
+  let inList = false;
+  let tableIsHeader = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    const trimmed = line.trim();
+
+    // Pass through HTML tags for collapsible sections
+    if (/^<\/?details>/.test(trimmed) || /^<summary>/.test(trimmed) || /^<\/summary>/.test(trimmed)) {
+      if (inList) { html += '</ul>'; inList = false; }
+      if (inTable) { html += '</table>'; inTable = false; }
+      html += inlineFormat(trimmed);
+      continue;
+    }
+
+    // Table rows
+    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+      if (/^\|[\s\-:|]+\|$/.test(trimmed)) continue; // skip separator
+      if (inList) { html += '</ul>'; inList = false; }
+      if (!inTable) { html += '<table>'; inTable = true; tableIsHeader = true; }
+      const cells = trimmed.split('|').slice(1, -1).map(c => c.trim());
+      if (tableIsHeader) {
+        html += '<tr>' + cells.map(c => `<th>${inlineFormat(c, false)}</th>`).join('') + '</tr>';
+        tableIsHeader = false;
+      } else {
+        html += '<tr>' + cells.map(c => `<td>${inlineFormat(c, true)}</td>`).join('') + '</tr>';
+      }
+      continue;
+    }
+    if (inTable) { html += '</table>'; inTable = false; }
+
+    // Headers
+    if (trimmed.startsWith('#### ')) { if(inList){html+='</ul>';inList=false;} html += `<h4>${inlineFormat(trimmed.slice(5))}</h4>`; continue; }
+    if (trimmed.startsWith('### ')) { if(inList){html+='</ul>';inList=false;} html += `<h3>${inlineFormat(trimmed.slice(4))}</h3>`; continue; }
+    if (trimmed.startsWith('## ')) { if(inList){html+='</ul>';inList=false;} html += `<h2>${inlineFormat(trimmed.slice(3))}</h2>`; continue; }
+    if (trimmed.startsWith('# ')) { if(inList){html+='</ul>';inList=false;} html += `<h1>${inlineFormat(trimmed.slice(2))}</h1>`; continue; }
+
+    // List items
+    if (/^[-*] /.test(trimmed) || /^\d+\. /.test(trimmed)) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      const content = trimmed.replace(/^[-*] /, '').replace(/^\d+\. /, '');
+      html += `<li>${inlineFormat(content)}</li>`;
+      continue;
+    }
+    if (inList && trimmed === '') { html += '</ul>'; inList = false; continue; }
+
+    // Empty line
+    if (trimmed === '') { if(inList){html+='</ul>';inList=false;} continue; }
+
+    // Paragraph
+    if(inList){html+='</ul>';inList=false;}
+    html += `<p>${inlineFormat(trimmed)}</p>`;
+  }
+  if (inTable) html += '</table>';
+  if (inList) html += '</ul>';
+  return html;
+}
+
+function inlineFormat(s, isTableCell) {
+  // In table cells, render image URLs as thumbnails
+  if (isTableCell && /^https?:\/\/.*\.(jpg|jpeg|png|gif|webp)/i.test(s.trim())) {
+    const url = s.trim();
+    return `<img class="td-preview" src="${url}" onerror="this.outerHTML='No preview'" alt="Ad">`;
+  }
+  if (isTableCell && /^https?:\/\/.*fbcdn/.test(s.trim())) {
+    const url = s.trim();
+    return `<img class="td-preview" src="${url}" onerror="this.outerHTML='No preview'" alt="Ad">`;
+  }
+  return s
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/`(.*?)`/g, '<code>$1</code>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+}
+</script>
+</body>
+</html>

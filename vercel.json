@@ -1,0 +1,15 @@
+{
+  "buildCommand": null,
+  "framework": null,
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/public/$1" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive, nosnippet" }
+      ]
+    }
+  ]
+}
