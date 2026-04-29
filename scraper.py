@@ -104,8 +104,9 @@ log = logging.getLogger("ads_scraper")
 
 # ── Global competitors (not region-specific, scrape with region="anywhere") ────
 GLOBAL_COMPETITORS = [
-    {"name": "Revolut", "website": "https://www.revolut.com/", "category": "Global", "known_id": "AR07098428377224183809", "known_name": "Revolut LTD"},
+    {"name": "Revolut", "website": "https://www.revolut.com/", "category": "Global", "known_id": "AR07098428377224183809", "known_name": "Revolut Ltd"},
     {"name": "Monzo", "website": "https://monzo.com/", "category": "Global", "known_id": "AR07289389941828616193", "known_name": "MONZO BANK LIMITED"},
+    # Cash App / Square / Block removed from Google Ads tracking
     {"name": "Wise", "website": "https://wise.com/", "category": "Global", "known_id": "AR14378710480124379137", "known_name": "Wise Payments Limited"},
     {"name": "Klarna", "website": "https://www.klarna.com/", "category": "Global", "known_id": "AR03841049863391281153", "known_name": "Klarna AB"},
 ]
@@ -130,6 +131,8 @@ HEADERS = [
     "Date Collected",
     "New This Week",
     "Scrape Batch ID",
+    "Platform",
+    "Embed URL",
 ]
 
 
@@ -487,6 +490,21 @@ def _resolve_displayads_url(ga: GoogleAds, url: str) -> tuple[str, str]:
             if yt_matches:
                 video_url = yt_matches[0]
 
+        # Extract thumbnail for video ads: YouTube thumbnails or lh3 images
+        if not image_url:
+            # YouTube video thumbnail (highest quality)
+            yt_thumbs = re.findall(r'https?://i\d*\.ytimg\.com/vi/([^/]+)/[a-z]+\.jpg', text)
+            if yt_thumbs:
+                image_url = f"https://i.ytimg.com/vi/{yt_thumbs[0]}/hqdefault.jpg"
+            else:
+                # lh3.googleusercontent.com hosted images (ad creatives)
+                lh3 = re.findall(r'(?:https?:)?//lh3\.googleusercontent\.com/[^\s\'"\\<>)]+', text)
+                if lh3:
+                    url_found = lh3[0]
+                    if url_found.startswith("//"):
+                        url_found = "https:" + url_found
+                    image_url = url_found
+
     except Exception as e:
         log.debug(f"Could not resolve displayads URL: {e}")
 
@@ -552,7 +570,7 @@ def get_ad_details_safe(ga: GoogleAds, advertiser_id: str, creative_id: str) -> 
         debug_dir = os.path.join(os.path.dirname(__file__) or ".", "debug_responses")
         os.makedirs(debug_dir, exist_ok=True)
         debug_count = len(os.listdir(debug_dir))
-        if debug_count < 10:  # only save first 10 for debugging
+        if debug_count < 30:  # save first 30 for debugging
             with open(os.path.join(debug_dir, f"{creative_id}.json"), "w") as f:
                 json.dump({"full_response": resp, "creative_block": creative_block}, f, indent=2, ensure_ascii=False)
 
@@ -566,18 +584,26 @@ def get_ad_details_safe(ga: GoogleAds, advertiser_id: str, creative_id: str) -> 
             raw_link = (creative_block.get("2", {}).get("4", "")
                         or creative_block.get("1", {}).get("4", ""))
         elif result["ad_format"] == "Image":
-            # The image HTML snippet contains the simgad URL
-            raw_html = creative_block.get("3", {}).get("2", "")
-            if raw_html:
+            # The image HTML snippet contains the simgad URL or sadbundle iframe
+            # Check ALL creative variants (resp["5"] can have multiple entries)
+            for variant in creatives:
+                raw_html = variant.get("3", {}).get("2", "")
+                if not raw_html:
+                    continue
                 # Extract simgad URL from HTML string
                 simgad = re.findall(r'https?://tpc\.googlesyndication\.com[^\s\'"\\<>]*simgad/\d+', raw_html)
                 if simgad:
                     result["image_url"] = simgad[0]
-                elif "'" in raw_html:
-                    # Fallback: split on quotes to get the URL
+                    break
+                # Extract sadbundle iframe URL (HTML5/rich media ads)
+                sadbundle = re.findall(r'https?://tpc\.googlesyndication\.com/archive/sadbundle/[^\s\'"\\<>]+', raw_html)
+                if sadbundle and not result.get("embed_url"):
+                    result["embed_url"] = sadbundle[0]
+                # Fallback: try any URL in the HTML
+                if "'" in raw_html and not result["image_url"]:
                     parts = raw_html.split("'")
                     for part in parts:
-                        if part.startswith("http"):
+                        if part.startswith("http") and "sadbundle" not in part:
                             raw_link = part
                             break
             if not result["image_url"] and not raw_link:
@@ -602,16 +628,30 @@ def get_ad_details_safe(ga: GoogleAds, advertiser_id: str, creative_id: str) -> 
             result["image_url"] = _find_image_url(creative_block)
         if not result["video_url"] and result["ad_format"] == "Video":
             result["video_url"] = _find_video_url(creative_block)
-            # Also try resolving any displayads link found anywhere
-            if not result["video_url"]:
-                all_text = json.dumps(creative_block)
-                displayads_urls = re.findall(r'https?://displayads-formats\.googleusercontent\.com[^\s\'"\\<>]+', all_text)
-                for durl in displayads_urls[:1]:
-                    img_url, vid_url = _resolve_displayads_url(ga, durl)
-                    if vid_url:
-                        result["video_url"] = vid_url
-                    if img_url and not result["image_url"]:
-                        result["image_url"] = img_url
+
+        # --- Strategy 4: Resolve ANY displayads URL found in the response ---
+        # Works for both image and video ads that don't have direct media URLs
+        if not result["image_url"] or (not result["video_url"] and result["ad_format"] == "Video"):
+            all_text = json.dumps(creative_block)
+            displayads_urls = re.findall(r'https?://displayads-formats\.googleusercontent\.com[^\s\'"\\<>]+', all_text)
+            for durl in displayads_urls[:2]:
+                img_url, vid_url = _resolve_displayads_url(ga, durl)
+                if vid_url and not result["video_url"]:
+                    result["video_url"] = vid_url
+                if img_url and not result["image_url"]:
+                    result["image_url"] = img_url
+
+        # --- Strategy 5: Search the FULL response (not just creative_block) ---
+        if not result["image_url"] and result["ad_format"] in ("Image", "Video"):
+            full_text = json.dumps(resp)
+            simgad_all = re.findall(r'https?://tpc\.googlesyndication\.com/[^\s\'"\\<>]*simgad/\d+', full_text)
+            if simgad_all:
+                result["image_url"] = simgad_all[0]
+            if not result["image_url"]:
+                # Try archive/simgad pattern
+                archive_all = re.findall(r'https?://tpc\.googlesyndication\.com/archive/simgad/\d+', full_text)
+                if archive_all:
+                    result["image_url"] = archive_all[0]
 
         # --- Extract landing page ---
         result["landing_page"] = _find_landing_page(creative_block)
@@ -688,6 +728,8 @@ def scrape_competitor(ga: GoogleAds, competitor: dict, batch_id: str) -> list[li
                 today,                                  # Date Collected
                 "",                                     # New This Week (filled later)
                 batch_id,                               # Scrape Batch ID
+                "Google Ads",                           # Platform
+                detail.get("embed_url", ""),             # Embed URL (sadbundle iframe)
             ]
             rows.append(row)
 
@@ -948,36 +990,108 @@ def write_summary(gc, sh_url: str, all_rows: list, batch_id: str):
         log.warning(f"Could not format summary: {e}")
 
 
-def generate_dashboard(all_rows: list[list]):
-    """Generate a local HTML dashboard from scraped data."""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+def _clean_row_for_dashboard(d: dict) -> dict:
+    """Clean a single row dict for dashboard display."""
+    # Clean image URLs: extract src from <img> tags, skip non-image URLs
+    img = d.get("Image URL", "")
+    if "<img" in img:
+        m = re.search(r'src=["\']([^"\'> ]+)', img)
+        img = m.group(1) if m else ""
+    if "sadbundle" in img or img.endswith(".html") or img.endswith(".js"):
+        img = ""
+    d["Image URL"] = img
+    # Clean video URLs
+    vid = d.get("Video URL", "")
+    if vid:
+        vid = vid.replace("&amp;", "&")
+        if vid.startswith("//"):
+            vid = "https:" + vid
+    d["Video URL"] = vid
+    if "Platform" not in d:
+        d["Platform"] = "Google Ads"
 
-    # Convert rows to list of dicts
-    data = []
+    # Determine ad status: "Active" if Last Shown is within the last 30 days, else "Inactive"
+    last_shown = d.get("Last Shown", "")
+    if last_shown:
+        try:
+            ls_date = datetime.datetime.strptime(last_shown, "%Y-%m-%d").date()
+            days_ago = (datetime.date.today() - ls_date).days
+            d["Status"] = "Active" if days_ago <= 30 else "Inactive"
+        except (ValueError, TypeError):
+            d["Status"] = "Active"
+    else:
+        d["Status"] = "Active"  # Unknown = Active
+
+    return d
+
+
+def generate_dashboard(all_rows: list[list]):
+    """Generate a local HTML dashboard from scraped data, merging with existing data."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    public_dir = os.path.join(script_dir, "public")
+    js_path = os.path.join(public_dir, "ads_data.js")
+
+    # Load existing dashboard data (if any)
+    existing_data = []
+    if os.path.exists(js_path):
+        try:
+            with open(js_path) as f:
+                raw = f.read().replace("const ADS_DATA = ", "", 1).rstrip().rstrip(";")
+            existing_data = json.loads(raw)
+            log.info(f"Loaded {len(existing_data)} existing ads from dashboard")
+        except Exception as e:
+            log.warning(f"Could not load existing dashboard data: {e}")
+
+    # Build lookup of existing ads by composite key (creative_id + region)
+    existing_map = {}
+    for d in existing_data:
+        key = f"{d.get('Creative ID', '')}_{d.get('Region', '')}"
+        existing_map[key] = d
+
+    # Convert new rows to dicts and merge
+    new_count = 0
+    updated_count = 0
     for row in all_rows:
         d = {}
         for i, h in enumerate(HEADERS):
             d[h] = row[i] if i < len(row) else ""
-        # Clean image URLs: extract src from <img> tags, skip non-image URLs
-        img = d.get("Image URL", "")
-        if "<img" in img:
-            m = re.search(r'src=["\']([^"\'> ]+)', img)
-            img = m.group(1) if m else ""
-        if "sadbundle" in img or img.endswith(".html") or img.endswith(".js"):
-            img = ""
-        d["Image URL"] = img
-        # Clean video URLs
-        vid = d.get("Video URL", "")
-        if vid:
-            vid = vid.replace("&amp;", "&")
-            if vid.startswith("//"):
-                vid = "https:" + vid
-        d["Video URL"] = vid
+        d = _clean_row_for_dashboard(d)
+
+        key = f"{d.get('Creative ID', '')}_{d.get('Region', '')}"
+        if key in existing_map:
+            # Update existing entry with fresh data (newer scrape wins)
+            old = existing_map[key]
+            # Preserve image/video/embed URLs if new scrape didn't find them
+            if not d.get("Image URL") and old.get("Image URL"):
+                d["Image URL"] = old["Image URL"]
+            if not d.get("Video URL") and old.get("Video URL"):
+                d["Video URL"] = old["Video URL"]
+            if not d.get("Embed URL") and old.get("Embed URL"):
+                d["Embed URL"] = old["Embed URL"]
+            existing_map[key] = d
+            updated_count += 1
+        else:
+            existing_map[key] = d
+            new_count += 1
+
+    # Re-compute status for ALL ads (existing ones may have become inactive)
+    data = []
+    for d in existing_map.values():
+        d = _clean_row_for_dashboard(d)
         data.append(d)
 
+    # Sort by Last Shown (newest first)
+    data.sort(key=lambda x: x.get("Last Shown", ""), reverse=True)
+
     # Write JS data file
-    js_path = os.path.join(script_dir, "ads_data.js")
     with open(js_path, "w") as f:
+        f.write("const ADS_DATA = ")
+        json.dump(data, f, ensure_ascii=False)
+        f.write(";")
+
+    # Also write to root for backward compat
+    root_js_path = os.path.join(script_dir, "ads_data.js")
+    with open(root_js_path, "w") as f:
         f.write("const ADS_DATA = ")
         json.dump(data, f, ensure_ascii=False)
         f.write(";")
@@ -987,7 +1101,7 @@ def generate_dashboard(all_rows: list[list]):
     with open(json_path, "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-    log.info(f"Dashboard data written: {len(data)} ads")
+    log.info(f"Dashboard data written: {len(data)} total ads ({new_count} new, {updated_count} updated)")
     log.info(f"  Open dashboard.html in a browser to view")
 
 

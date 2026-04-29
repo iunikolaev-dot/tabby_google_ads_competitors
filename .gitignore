@@ -4,3 +4,24 @@ __pycache__/
 *.pyc
 *.log
 debug_responses/
+.vercel
+.env
+.env*.local
+
+# Scraper output / large data artifacts
+bq_results.json
+targeted_scrape_results.json
+firecrawl_fresh_scrape.json
+embed_urls.json
+backups/
+staging/
+metrics/
+logs/
+
+# Downloaded media (regenerable, large)
+public/meta_images/
+public/google_videos/
+public/screenshots/
+
+# Personal notes
+OpenAI ad analysis prompt.rtf
