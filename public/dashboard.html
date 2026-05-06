@@ -113,6 +113,11 @@ h3.section{margin-bottom:10px;font-size:15px;font-weight:600}
 
 <script src="ads_data.js"></script>
 <script>
+// Normalize schema variants: crawlerbros Global rows ship Regions[]/retired instead of Region/Status
+ADS_DATA.forEach(a=>{
+  if(!a['Region']) a['Region'] = Array.isArray(a['Regions']) && a['Regions'].length ? a['Regions'].join(', ') : 'Global';
+  if(!a['Status']) a['Status'] = a['retired']===true ? 'Inactive' : 'Active';
+});
 let sortKey='Last Shown', sortDir=-1;
 
 // ── Helpers ──
