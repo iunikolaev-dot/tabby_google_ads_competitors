@@ -54,6 +54,10 @@ if os.path.exists(ENV_PATH):
 FIRECRAWL_API_KEY = ENV.get("FIRECRAWL_API_KEY", "")
 APIFY_TOKEN = ENV.get("APIFY_TOKEN", "")
 OPENAI_API_KEY = ENV.get("OPENAI_API_KEY", "")
+BLOB_READ_WRITE_TOKEN = ENV.get("BLOB_READ_WRITE_TOKEN", "")
+# Propagate to env so blob_uploader picks it up via os.environ
+if BLOB_READ_WRITE_TOKEN:
+    os.environ.setdefault("BLOB_READ_WRITE_TOKEN", BLOB_READ_WRITE_TOKEN)
 
 # ── Constants ────────────────────────────────────────────────────────────────
 PUBLIC_DIR = os.path.join(SCRIPT_DIR, "public")
@@ -646,9 +650,31 @@ def scrape_meta_ads() -> list:
         })
 
     log.info(f"  Transformed {len(meta_ads)} Meta ads")
-    # Local image download removed: dashboard uses remote Image URL directly,
-    # public/meta_images/ is .gitignored so files never reach Vercel anyway.
-    # Phase B (Vercel Blob / R2) will replace this with permanent CDN uploads.
+
+    # Mirror Meta CDN images to Vercel Blob for permanent URLs (Meta `oe=`
+    # tokens expire in 5–14 days; Blob URLs don't). Skipped silently if
+    # BLOB_READ_WRITE_TOKEN is unset — pipeline still works with raw FB URLs.
+    if BLOB_READ_WRITE_TOKEN and meta_ads:
+        from scrapers import blob_uploader
+        log.info(f"  Mirroring {len(meta_ads)} Meta images to Vercel Blob...")
+        mirrored = 0
+        skipped = 0
+        for ad in meta_ads:
+            remote = ad.get("Image URL", "")
+            cid = ad.get("Creative ID", "")
+            if not remote or not cid:
+                skipped += 1
+                continue
+            permanent = blob_uploader.mirror_image(remote, cid)
+            if permanent:
+                ad["Image URL"] = permanent
+                mirrored += 1
+            else:
+                skipped += 1
+        log.info(f"  Blob mirroring: {mirrored} ok, {skipped} skipped/failed")
+    elif meta_ads:
+        log.info("  BLOB_READ_WRITE_TOKEN not set — skipping CDN mirror "
+                 "(Meta URLs will expire in ~5–14 days)")
     return meta_ads
 
 
