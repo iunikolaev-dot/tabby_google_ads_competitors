@@ -295,6 +295,95 @@ def scrape_google_ads() -> list:
     return all_ads
 
 
+def scrape_google_ads_apify() -> list:
+    """Step 1 (preferred): Google Ads via Apify (crawlerbros).
+
+    Replaces FireCrawl as the primary Google scraper. FireCrawl was unreliable —
+    multiple 180s timeouts per run, silent zero-ad returns for whole competitors.
+    Apify (crawlerbros) returns reliably in ~30s/advertiser at $0.70/1k ads.
+
+    Returns ads in the v1-shaped dict consumed by merge_and_generate. Hard caps
+    per-run cost at $2.00 (PRD §4.3).
+    """
+    log.info("=" * 60)
+    log.info("STEP 1: Google Ads via Apify (crawlerbros)")
+    log.info("=" * 60)
+
+    if not APIFY_TOKEN:
+        log.error("APIFY_TOKEN not set in .env — skipping Google Ads")
+        return []
+
+    # Lazy imports to avoid coupling run_weekly to v2 modules at import time.
+    import config as cfg
+    from scrapers import apify_google
+
+    # Names the dashboard already uses (legacy). config.COMPETITORS has the
+    # canonical name; the dashboard's existing Competitor Name values diverge
+    # for one entry. Keep the dashboard view stable.
+    NAME_OVERRIDE = {"Al Rajhi Bank": "Rajhi Bank"}
+
+    # config.COMPETITORS doesn't carry website; dashboard renders it though.
+    WEBSITES = {
+        "Klarna": "https://www.klarna.com/",
+        "Wise": "https://wise.com/",
+        "Monzo": "https://monzo.com/",
+        "Cash App": "https://cash.app/",
+        "Revolut": "https://www.revolut.com/",
+        "Tamara": "https://www.tamara.co/",
+        "EmiratesNBD": "https://www.emiratesnbd.com/",
+        "Rajhi Bank": "https://www.alrajhibank.com.sa/",
+        "Ziina": "https://ziina.com/",
+    }
+
+    competitors = [c for c in cfg.COMPETITORS if c.get("google_advertiser_ids")]
+    log.info(f"  {len(competitors)} competitors with Google ads")
+
+    all_ads: list = []
+    total_cost = 0.0
+    COST_CAP_USD = 2.00
+
+    for comp in competitors:
+        if total_cost >= COST_CAP_USD:
+            log.warning(f"  Cost cap ${COST_CAP_USD} reached — skipping rest")
+            break
+        region_label = comp.get("google_region") or "anywhere"
+        log.info(f"  {comp['name']} ({region_label}): scraping...")
+        try:
+            result = apify_google.scrape_competitor(comp, BATCH_ID, results_limit=200)
+        except Exception as e:
+            log.warning(f"    Exception: {e}")
+            continue
+        if not result["ok"]:
+            log.warning(f"    Failed: {'; '.join(result['errors'][:2])}")
+            continue
+
+        rows = result["rows"]
+        cost = result["stats"]["estimated_cost_usd"]
+        total_cost += cost
+        log.info(f"    Got {len(rows)} ads (~${cost:.2f})")
+
+        is_global = comp.get("category") == "Global"
+        region_v1 = "Global" if is_global else (comp.get("google_region") or "")
+        cat_v1 = "Global" if is_global else "GCC"
+        display_name = NAME_OVERRIDE.get(comp["name"], comp["name"])
+
+        for row in rows:
+            all_ads.append({
+                "cid": row["Creative ID"],
+                "adv_id": row["Advertiser ID"],
+                "adv_name": row.get("Advertiser Name (Transparency Center)") or "",
+                "fmt": row["Ad Format"],
+                "img": row.get("Image URL", "") or "",
+                "_name": display_name,
+                "_web": WEBSITES.get(display_name, ""),
+                "_cat": cat_v1,
+                "_region": region_v1,
+            })
+
+    log.info(f"  Google Ads done: {len(all_ads)} ads, est. cost: ${total_cost:.2f}")
+    return all_ads
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # STEP 2: OPENAI VISION FILTER (Cash App → remove Square/BitKey)
 # ═════════════════════════════════════════════════════════════════════════════
@@ -557,35 +646,9 @@ def scrape_meta_ads() -> list:
         })
 
     log.info(f"  Transformed {len(meta_ads)} Meta ads")
-
-    # Download images locally (fbcdn URLs expire)
-    os.makedirs(META_IMAGES_DIR, exist_ok=True)
-    session = requests.Session()
-    session.headers.update({"User-Agent": "Mozilla/5.0"})
-    downloaded = 0
-    for ad in meta_ads:
-        url = ad.get("Image URL", "")
-        cid = ad.get("Creative ID", "")
-        if not url or not cid:
-            continue
-        ext = "png" if ".png" in url.lower() else "jpg"
-        filepath = os.path.join(META_IMAGES_DIR, f"{cid}.{ext}")
-        if os.path.exists(filepath) and os.path.getsize(filepath) > 500:
-            ad["Local Image"] = f"/meta_images/{cid}.{ext}"
-            downloaded += 1
-            continue
-        try:
-            r = session.get(url, timeout=10)
-            if r.status_code == 200 and len(r.content) > 500:
-                with open(filepath, "wb") as f:
-                    f.write(r.content)
-                ad["Local Image"] = f"/meta_images/{cid}.{ext}"
-                downloaded += 1
-            time.sleep(0.2)
-        except Exception:
-            pass
-
-    log.info(f"  Downloaded {downloaded}/{len(meta_ads)} images locally")
+    # Local image download removed: dashboard uses remote Image URL directly,
+    # public/meta_images/ is .gitignored so files never reach Vercel anyway.
+    # Phase B (Vercel Blob / R2) will replace this with permanent CDN uploads.
     return meta_ads
 
 
@@ -796,8 +859,8 @@ def main():
     log.info(f"WEEKLY AD INTELLIGENCE PIPELINE — {BATCH_ID}")
     log.info(f"{'=' * 60}")
 
-    # Step 1: Google Ads
-    google_ads = scrape_google_ads()
+    # Step 1: Google Ads (via Apify; FireCrawl path kept as scrape_google_ads for fallback)
+    google_ads = scrape_google_ads_apify()
 
     # Step 2: Filter Cash App
     google_ads = filter_cash_app_ads(google_ads)
@@ -805,11 +868,12 @@ def main():
     # Step 3: Meta Ads
     meta_ads = scrape_meta_ads()
 
-    # Step 4: Merge & generate
+    # Step 4: Merge & generate (writes public/ads_data.js)
     all_data = merge_and_generate(google_ads, meta_ads)
 
-    # Step 5: Deploy
-    deploy_vercel()
+    # Step 5: Deploy is handled by `git push` → Vercel auto-deploy.
+    # The legacy `npx vercel --prod` step uploaded the 1.6 GB gitignored
+    # meta_images/ working tree and timed out at 180s. Removed.
 
     # Summary
     elapsed = time.time() - start_time
@@ -817,7 +881,7 @@ def main():
     log.info(f"DONE in {elapsed:.0f}s — {len(all_data)} total ads")
     log.info(f"  Google Ads: {sum(1 for d in all_data if d.get('Platform') == 'Google Ads')}")
     log.info(f"  Meta Ads: {sum(1 for d in all_data if d.get('Platform') == 'Meta Ads')}")
-    log.info(f"  FireCrawl pages: ~{len(GOOGLE_COMPETITORS) * 2}")
+    log.info(f"  Next: git add public/ads_data.js && git commit && git push")
     log.info(f"{'=' * 60}")
 
 
