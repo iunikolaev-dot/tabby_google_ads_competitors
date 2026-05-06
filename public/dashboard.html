@@ -246,8 +246,7 @@ function renderBreakdown(){
 
 function renderGrid(ads){
   document.getElementById('gridView').innerHTML=ads.map(ad=>{
-    const localVideo=ad['Local Video']||'';
-    const img=ad['Local Image']||cleanImageUrl(ad['Image URL']);
+    const img=cleanImageUrl(ad['Image URL']);
     const vid=cleanVideoUrl(ad['Video URL']);
     const vidOk=vid&&!isVideoUrlExpired(vid);
     const preview=ad['Ad Preview URL']||'';
@@ -256,10 +255,7 @@ function renderGrid(ads){
     const fmtIcon = ad['Ad Format']==='Video' ? '\u25B6' : ad['Ad Format']==='Image' ? '\u{1F5BC}' : '\u{1F4DD}';
     const fmtColor = ad['Ad Format']==='Video' ? '#f87171' : ad['Ad Format']==='Image' ? '#60a5fa' : '#facc15';
     const isVideo=ad['Ad Format']==='Video';
-    if(localVideo){
-      // Show local MP4 video — autoplay first frame as poster, play on hover
-      media=`<video src="${localVideo}" muted loop preload="metadata" playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0" style="width:100%;height:100%;object-fit:contain;background:#000"></video>`;
-    } else if(img){
+    if(img){
       // Show image thumbnail — for video ads, add play overlay
       media=`<img src="${img}" alt="Ad" onerror="this.parentElement.innerHTML='<div class=no-preview><div style=font-size:32px;margin-bottom:6px>${fmtIcon}</div><div>${ad['Ad Format']} ad</div></div>'">`;
       if(isVideo) media+=`<div class="play-overlay"></div>`;
@@ -274,12 +270,10 @@ function renderGrid(ads){
       const viewLabel=ad['Platform']==='Meta Ads'?'View on Meta':'View on Google';
       media=`<div class="no-preview" style="height:${ad['Status']==='Active'?'220':'80'}px"><div style="font-size:${ad['Status']==='Active'?'36':'12'}px;${ad['Status']==='Active'?'margin-bottom:8px;color:'+fmtColor:'color:var(--muted)'}">${ad['Status']==='Active'?fmtIcon:''}</div>${ad['Status']==='Active'?'<div style="font-size:14px;font-weight:500">'+ad['Ad Format']+' Ad</div>':''}<div style="margin-top:8px;font-size:11px"><a href="${preview}" target="_blank" style="color:var(--accent-l);text-decoration:none">${viewLabel} &rarr;</a></div></div>`;
     }
-    // Click handler: local videos open in lightbox; videos without local file open preview URL
-    const clickAction=localVideo
-      ?`onclick="openLightbox('','${localVideo}','')"`
-      :(isVideo
-        ?`onclick="window.open('${preview.replace(/'/g,"\\'")}','_blank')"`
-        :(img?`onclick="openLightbox('${img}','','${preview}')"`:`onclick="window.open('${preview.replace(/'/g,"\\'")}','_blank')"`));
+    // Click: image opens lightbox, video ads open preview URL (Meta CDN videos require auth)
+    const clickAction = isVideo
+      ? `onclick="window.open('${preview.replace(/'/g,"\\'")}','_blank')"`
+      : (img ? `onclick="openLightbox('${img}','','${preview}')"` : `onclick="window.open('${preview.replace(/'/g,"\\'")}','_blank')"`);
     return `<div class="ad-card">
       <div class="media" ${clickAction}>${media}</div>
       <div class="info">
@@ -293,7 +287,7 @@ function renderGrid(ads){
 
 function renderTable(ads){
   document.getElementById('tBody').innerHTML=ads.map(ad=>{
-    const img=ad['Local Image']||cleanImageUrl(ad['Image URL']);
+    const img=cleanImageUrl(ad['Image URL']);
     const vid=cleanVideoUrl(ad['Video URL']);
     const preview=ad['Ad Preview URL']||'';
     const isNew=ad['New This Week']==='NEW';
