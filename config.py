@@ -268,8 +268,13 @@ APIFY_GOOGLE_ACTOR: str = "crawlerbros/google-ads-scraper"
 #   Only VIDEO and TEXT formats are requested from crawlerbros.
 GOOGLE_REJECTED_FORMATS: set[str] = {"TEXT"}  # crawlerbros format filter
 HTML5_REJECT_INDICATORS: tuple[str, ...] = (
-    "displayads-formats.googleusercontent.com",
-    "content.js",
+    # Only `sadbundle` is a true HTML5 rich-media bundle indicator.
+    # Removed `displayads-formats.googleusercontent.com` and `content.js`
+    # on 2026-05-02: empirically those patterns appear in the JS-render
+    # embed URL for EVERY legitimate Google VIDEO creative and many IMAGE
+    # ones. Treating them as rejection signals dropped 100% of VIDEO ads
+    # from crawlerbros output (323 rows lost in the 2026-05-02 Globals
+    # merge before this fix). Keep the list narrow.
     "sadbundle",
 )
 # Legacy constant kept for any code that references it.

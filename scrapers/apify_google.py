@@ -178,7 +178,7 @@ def _build_v2_row(
 
     raw_fmt = (item.get("format") or "").upper()
 
-    # Rule 1: Reject formats in GOOGLE_REJECTED_FORMATS (e.g. IMAGE).
+    # Rule 1: Reject formats in GOOGLE_REJECTED_FORMATS (Invariant I3 — TEXT).
     if raw_fmt in config.GOOGLE_REJECTED_FORMATS:
         return None
 
@@ -186,6 +186,19 @@ def _build_v2_row(
     for url_field in (preview_url, image_url, video_url):
         if any(ind in url_field for ind in config.HTML5_REJECT_INDICATORS):
             return None
+
+    # Rule 3: Fall back to previewUrl when crawlerbros omits the asset URL.
+    # Confirmed 2026-05-01: crawlerbros returns videoUrl/imageUrl=null for a
+    # significant fraction of ads (Monzo videos: 64/88 missing; Cash App
+    # images: 52/280 missing). previewUrl is ALWAYS populated and is either:
+    #   - A direct CDN image (s0.2mdn.net/..., tpc.googlesyndication.com/...)
+    #   - A JS-render embed (displayads-formats.googleusercontent.com/...)
+    # Either renders in the dashboard. Accepting previewUrl as a fallback
+    # lifts coverage without re-scrape cost.
+    if raw_fmt == "VIDEO" and not video_url and preview_url:
+        video_url = preview_url
+    if raw_fmt == "IMAGE" and not image_url and preview_url:
+        image_url = preview_url
 
     fmt = raw_fmt.capitalize() or ("Video" if video_url else "Image")
 
@@ -235,25 +248,31 @@ def _build_v2_row(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_actor_input(
-    advertiser_ids: list[str],
+    advertiser_id: str,
     region: str,
     results_limit: int,
 ) -> dict:
     """
-    Build crawlerbros input.
+    Build crawlerbros input for a SINGLE advertiser.
 
-    The actor accepts a list of `advertiserUrl` entries. We feed it the
-    Transparency Center URL for each advertiser ID in the canonical region.
+    IMPORTANT: crawlerbros silently fails on multi-URL `startUrls` arrays.
+    Empirically (2026-05-01), passing 4–5 URLs returns 0 items OR only the
+    first URL's items, with no error. The actor reports SUCCEEDED.
+    `scrape_competitor` therefore loops one URL per actor run.
+
+    The region MUST be embedded in the URL itself (`?region=anywhere` or
+    `?region=SA`). Passing `region` as a top-level input field also fails
+    silently — same root cause, same date.
     """
-    urls = [
-        f"https://adstransparency.google.com/advertiser/{aid}"
-        f"{('?region=' + region) if region else ''}"
-        for aid in advertiser_ids
-    ]
+    region_param = region or "anywhere"
+    url = (
+        f"https://adstransparency.google.com/advertiser/{advertiser_id}"
+        f"?region={region_param}"
+    )
     return {
-        "startUrls": [{"url": u} for u in urls],
-        "maxItems": results_limit,
-        "resultsLimit": results_limit,  # some actor versions use this name
+        "startUrls": [{"url": url}],
+        "resultsLimit": results_limit,
+        "skipDetails": False,  # we need imageUrl/videoUrl/previewUrl details
     }
 
 
@@ -296,51 +315,64 @@ def scrape_competitor(
         result["errors"].append("APIFY_TOKEN not set in env")
         return result
 
-    actor_input = _build_actor_input(advertiser_ids, region, results_limit)
-
+    # crawlerbros silently fails on multi-URL inputs (confirmed 2026-05-01).
+    # Loop one advertiser per actor run; aggregate stats and items.
     log.info(f"Apify Google: {name} / {len(advertiser_ids)} advertiser(s) "
-             f"/ limit={results_limit}")
-    ok, run_id, err = _start_run(token, actor_input)
-    if not ok:
-        result["errors"].append(f"{name}: start failed: {err}")
-        return result
-    result["stats"]["run_id"] = run_id
+             f"/ limit={results_limit} / region={region or 'anywhere'}")
 
-    ok, run_data, err = _wait_for_run(token, run_id)
-    if not ok:
-        result["errors"].append(f"{name}: run failed: {err}")
-        return result
+    all_items: list[dict] = []
+    run_ids: list[str] = []
+    dataset_ids: list[str] = []
 
-    dataset_id = run_data.get("defaultDatasetId", "")
-    result["stats"]["dataset_id"] = dataset_id
-    if not dataset_id:
-        result["errors"].append(f"{name}: no dataset_id on finished run")
-        return result
+    for aid in advertiser_ids:
+        actor_input = _build_actor_input(aid, region, results_limit)
+        ok, run_id, err = _start_run(token, actor_input)
+        if not ok:
+            result["errors"].append(f"{name}/{aid}: start failed: {err}")
+            continue
+        run_ids.append(run_id)
 
-    ok, items, err = _fetch_dataset(token, dataset_id)
-    if not ok:
-        result["errors"].append(f"{name}: dataset fetch failed: {err}")
-        return result
+        ok, run_data, err = _wait_for_run(token, run_id)
+        if not ok:
+            result["errors"].append(f"{name}/{aid}: run failed: {err}")
+            continue
 
-    result["stats"]["items_fetched"] = len(items)
-    result["stats"]["estimated_cost_usd"] = estimate_cost_usd(len(items))
+        dataset_id = run_data.get("defaultDatasetId", "")
+        if not dataset_id:
+            result["errors"].append(f"{name}/{aid}: no dataset_id on finished run")
+            continue
+        dataset_ids.append(dataset_id)
+
+        ok, items, err = _fetch_dataset(token, dataset_id)
+        if not ok:
+            result["errors"].append(f"{name}/{aid}: dataset fetch failed: {err}")
+            continue
+
+        log.info(f"  {aid}: {len(items)} items")
+        all_items.extend(items)
+
+    result["stats"]["run_id"] = ",".join(run_ids)
+    result["stats"]["dataset_id"] = ",".join(dataset_ids)
+    result["stats"]["items_fetched"] = len(all_items)
+    result["stats"]["estimated_cost_usd"] = estimate_cost_usd(len(all_items))
 
     config.STAGING_DIR.mkdir(parents=True, exist_ok=True)
     safe = name.replace(" ", "_").replace("/", "_")
     (config.STAGING_DIR / f"google_{safe}_{batch_id}.json").write_text(
-        json.dumps(items, ensure_ascii=False, indent=2)
+        json.dumps(all_items, ensure_ascii=False, indent=2)
     )
 
     today = date.today().isoformat()
     rows: list[dict] = []
-    for item in items:
+    for item in all_items:
         row = _build_v2_row(item, competitor, batch_id, today)
         if row:
             rows.append(row)
 
     result["stats"]["rows_built"] = len(rows)
     result["rows"] = rows
-    result["ok"] = True
+    # ok=True iff at least one advertiser succeeded
+    result["ok"] = len(all_items) > 0 or not advertiser_ids
     return result
 
 
