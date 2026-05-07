@@ -233,24 +233,33 @@ function updateSelection() {
   const count = parseInt(adSlider.value);
   sliderVal.textContent = count;
 
+  // Renderable = anything the dashboard would show: Image URL OR Embed URL.
+  // Local Image is dropped (it's a /meta_images/* path that 403s on Vercel).
+  const hasPreview = a => a['Image URL'] || a['Embed URL'];
+
   const selected = rankedAds.slice(0, count);
   const selVideos = selected.filter(a => a['Ad Format'] === 'Video').length;
   const selImages = selected.filter(a => a['Ad Format'] === 'Image').length;
-  const selImgWithPreview = selected.filter(a => a['Local Image'] || a['Image URL']).length;
+  const selImgWithPreview = selected.filter(hasPreview).length;
 
   document.getElementById('selNote').textContent =
     `${count} of ${rankedAds.length} ads will be analyzed (${selVideos} video, ${selImages} image, ${selImgWithPreview} with visual preview). Sorted by run duration — longest first.`;
 
   // Show preview grid with selected/dimmed states
   const grid = document.getElementById('previewGrid');
-  const allWithImages = rankedAds.filter(a => a['Local Image'] || a['Image URL']);
+  const allWithImages = rankedAds.filter(hasPreview);
   // Show up to 20 thumbnails
   const toShow = allWithImages.slice(0, 20);
   grid.innerHTML = toShow.map((a, i) => {
     const rank = rankedAds.indexOf(a);
     const isSelected = rank < count;
+    const img = a['Image URL'];
+    const embed = a['Embed URL'];
+    const media = img
+      ? `<img src="${img}" onerror="this.parentElement.style.display='none'" alt="Ad">`
+      : `<iframe src="${embed}" loading="lazy" sandbox="allow-scripts allow-same-origin" scrolling="no" style="width:100%;height:85px;border:none;display:block;pointer-events:none"></iframe>`;
     return `<div class="preview-item ${isSelected ? 'selected' : 'dimmed'}">
-      <img src="${a['Local Image']||a['Image URL']}" onerror="this.parentElement.style.display='none'" alt="Ad">
+      ${media}
       ${isSelected ? `<span class="badge">#${rank+1}</span>` : ''}
       <span class="days">${a._days}d</span>
     </div>`;
@@ -310,8 +319,9 @@ btnAnalyze.addEventListener('click', async () => {
     landingPages.forEach(lp => { adsSummary += `- ${lp}\n`; });
   }
 
-  // Collect image URLs for visual analysis
-  const sampleImages = [...new Set(selected.filter(a => a['Local Image'] || a['Image URL']).map(a => a['Local Image'] ? window.location.origin + a['Local Image'] : a['Image URL']))].slice(0, 8);
+  // Collect image URLs for visual analysis. Local Image dropped — those paths
+  // 403 on Vercel; OpenAI Vision wouldn't be able to fetch them anyway.
+  const sampleImages = [...new Set(selected.filter(a => a['Image URL']).map(a => a['Image URL']))].slice(0, 8);
 
   try {
     const resp = await fetch('/api/analyze', {
