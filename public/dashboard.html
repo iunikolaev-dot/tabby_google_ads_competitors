@@ -263,8 +263,9 @@ function renderGrid(ads){
       // Show screenshot taken from Transparency Center
       media=`<img src="${ad['Screenshot']}" alt="Ad screenshot" onerror="this.parentElement.innerHTML='<div class=no-preview><div style=font-size:32px;margin-bottom:6px>${fmtIcon}</div><div>${ad['Ad Format']} ad</div></div>'">`;
       if(isVideo) media+=`<div class="play-overlay"></div>`;
-    } else if(ad['Embed URL'] && (ad['Embed URL'].includes('sadbundle') || ad['Embed URL'].includes('content.html'))){
-      // Iframe sadbundle or content.html URLs (render properly)
+    } else if(ad['Embed URL']){
+      // Trust upstream classification — pipeline only stores iframeable URLs
+      // here (sadbundle, content.html, displayads-formats.googleusercontent.com).
       media=`<iframe src="${ad['Embed URL']}" loading="lazy" sandbox="allow-scripts allow-same-origin" scrolling="no"></iframe>`;
     } else {
       const viewLabel=ad['Platform']==='Meta Ads'?'View on Meta':'View on Google';

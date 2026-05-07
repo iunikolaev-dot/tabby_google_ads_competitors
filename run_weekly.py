@@ -54,10 +54,6 @@ if os.path.exists(ENV_PATH):
 FIRECRAWL_API_KEY = ENV.get("FIRECRAWL_API_KEY", "")
 APIFY_TOKEN = ENV.get("APIFY_TOKEN", "")
 OPENAI_API_KEY = ENV.get("OPENAI_API_KEY", "")
-BLOB_READ_WRITE_TOKEN = ENV.get("BLOB_READ_WRITE_TOKEN", "")
-# Propagate to env so blob_uploader picks it up via os.environ
-if BLOB_READ_WRITE_TOKEN:
-    os.environ.setdefault("BLOB_READ_WRITE_TOKEN", BLOB_READ_WRITE_TOKEN)
 
 # ── Constants ────────────────────────────────────────────────────────────────
 PUBLIC_DIR = os.path.join(SCRIPT_DIR, "public")
@@ -317,27 +313,9 @@ def scrape_google_ads_apify() -> list:
         log.error("APIFY_TOKEN not set in .env — skipping Google Ads")
         return []
 
-    # Lazy imports to avoid coupling run_weekly to v2 modules at import time.
+    # Lazy import to avoid coupling run_weekly to v2 modules at import time.
     import config as cfg
     from scrapers import apify_google
-
-    # Names the dashboard already uses (legacy). config.COMPETITORS has the
-    # canonical name; the dashboard's existing Competitor Name values diverge
-    # for one entry. Keep the dashboard view stable.
-    NAME_OVERRIDE = {"Al Rajhi Bank": "Rajhi Bank"}
-
-    # config.COMPETITORS doesn't carry website; dashboard renders it though.
-    WEBSITES = {
-        "Klarna": "https://www.klarna.com/",
-        "Wise": "https://wise.com/",
-        "Monzo": "https://monzo.com/",
-        "Cash App": "https://cash.app/",
-        "Revolut": "https://www.revolut.com/",
-        "Tamara": "https://www.tamara.co/",
-        "EmiratesNBD": "https://www.emiratesnbd.com/",
-        "Rajhi Bank": "https://www.alrajhibank.com.sa/",
-        "Ziina": "https://ziina.com/",
-    }
 
     competitors = [c for c in cfg.COMPETITORS if c.get("google_advertiser_ids")]
     log.info(f"  {len(competitors)} competitors with Google ads")
@@ -369,7 +347,7 @@ def scrape_google_ads_apify() -> list:
         is_global = comp.get("category") == "Global"
         region_v1 = "Global" if is_global else (comp.get("google_region") or "")
         cat_v1 = "Global" if is_global else "GCC"
-        display_name = NAME_OVERRIDE.get(comp["name"], comp["name"])
+        display_name = _NAME_OVERRIDE.get(comp["name"], comp["name"])
 
         for row in rows:
             all_ads.append({
@@ -378,8 +356,10 @@ def scrape_google_ads_apify() -> list:
                 "adv_name": row.get("Advertiser Name (Transparency Center)") or "",
                 "fmt": row["Ad Format"],
                 "img": row.get("Image URL", "") or "",
+                "embed": row.get("Embed URL", "") or "",
+                "vid": row.get("Video URL", "") or "",
                 "_name": display_name,
-                "_web": WEBSITES.get(display_name, ""),
+                "_web": _WEBSITES.get(display_name, ""),
                 "_cat": cat_v1,
                 "_region": region_v1,
             })
@@ -457,19 +437,51 @@ def filter_cash_app_ads(google_ads: list) -> list:
 # STEP 3: META ADS VIA APIFY
 # ═════════════════════════════════════════════════════════════════════════════
 
-META_PAGE_MAP = {
-    "888799511134149": ("Cash App", "Global", "https://cash.app/"),
-    "107593894218382": ("Tamara", "GCC", "https://www.tamara.co/"),
-    "105245002169048": ("Tiqmo", "GCC", "https://tiqmo.com/"),
-    "100238958486269": ("D360 Bank", "GCC", "https://www.d360.bank/"),
-    "370543246139130": ("Barq", "GCC", "https://usebarq.com/"),
-    "102791935482897": ("Wio Bank", "GCC", "https://wio.io/"),
-    "141270813154032": ("STC Bank", "GCC", "https://www.stcbank.com.sa/"),
-    "379823329174805": ("HALA Payment", "GCC", "https://hala.com/"),
-    "102701872367080": ("Alaan", "GCC", "https://www.alaan.com/"),
-    "390926061079580": ("Klarna", "Global", "https://www.klarna.com/"),
-    "113612035651775": ("Monzo", "Global", "https://monzo.com/"),
+# Display-name and website overrides keyed by config.COMPETITORS["name"].
+# Dashboard rows historically used "Rajhi Bank"; config canonical is "Al Rajhi
+# Bank". config.COMPETITORS doesn't carry a website field, so we keep the map
+# here. Any new competitor added to config also needs an entry here.
+_NAME_OVERRIDE = {"Al Rajhi Bank": "Rajhi Bank"}
+_WEBSITES = {
+    "Klarna": "https://www.klarna.com/",
+    "Wise": "https://wise.com/",
+    "Monzo": "https://monzo.com/",
+    "Cash App": "https://cash.app/",
+    "Revolut": "https://www.revolut.com/",
+    "Tamara": "https://www.tamara.co/",
+    "EmiratesNBD": "https://www.emiratesnbd.com/",
+    "Rajhi Bank": "https://www.alrajhibank.com.sa/",
+    "Ziina": "https://ziina.com/",
+    "Tiqmo": "https://tiqmo.com/",
+    "D360 Bank": "https://www.d360.bank/",
+    "Barq": "https://usebarq.com/",
+    "Wio Bank": "https://wio.io/",
+    "STC Bank": "https://www.stcbank.com.sa/",
+    "HALA Payment": "https://hala.com/",
+    "Alaan": "https://www.alaan.com/",
 }
+
+
+def _build_meta_page_map() -> dict:
+    """Derive META_PAGE_MAP from config.COMPETITORS (single source of truth).
+
+    Previously hardcoded — fell out of sync with config and silently skipped
+    Wise + Revolut. Pulling from config catches new competitors automatically.
+    """
+    import config as cfg
+    m: dict = {}
+    for c in cfg.COMPETITORS:
+        pid = c.get("meta_page_id")
+        if not pid:
+            continue
+        display = _NAME_OVERRIDE.get(c["name"], c["name"])
+        # Dashboard convention: "Global" stays, "Regional" → "GCC"
+        cat = "Global" if c.get("category") == "Global" else "GCC"
+        m[pid] = (display, cat, _WEBSITES.get(display, ""))
+    return m
+
+
+META_PAGE_MAP = _build_meta_page_map()
 
 APIFY_API = "https://api.apify.com/v2"
 
@@ -650,31 +662,8 @@ def scrape_meta_ads() -> list:
         })
 
     log.info(f"  Transformed {len(meta_ads)} Meta ads")
-
-    # Mirror Meta CDN images to Vercel Blob for permanent URLs (Meta `oe=`
-    # tokens expire in 5–14 days; Blob URLs don't). Skipped silently if
-    # BLOB_READ_WRITE_TOKEN is unset — pipeline still works with raw FB URLs.
-    if BLOB_READ_WRITE_TOKEN and meta_ads:
-        from scrapers import blob_uploader
-        log.info(f"  Mirroring {len(meta_ads)} Meta images to Vercel Blob...")
-        mirrored = 0
-        skipped = 0
-        for ad in meta_ads:
-            remote = ad.get("Image URL", "")
-            cid = ad.get("Creative ID", "")
-            if not remote or not cid:
-                skipped += 1
-                continue
-            permanent = blob_uploader.mirror_image(remote, cid)
-            if permanent:
-                ad["Image URL"] = permanent
-                mirrored += 1
-            else:
-                skipped += 1
-        log.info(f"  Blob mirroring: {mirrored} ok, {skipped} skipped/failed")
-    elif meta_ads:
-        log.info("  BLOB_READ_WRITE_TOKEN not set — skipping CDN mirror "
-                 "(Meta URLs will expire in ~5–14 days)")
+    # Image URLs come straight from Apify (Meta CDN). They expire in 5-14
+    # days, so this pipeline must run weekly to keep previews fresh.
     return meta_ads
 
 
@@ -728,8 +717,10 @@ def merge_and_generate(google_ads: list, meta_ads: list):
         d = existing_map.get(key, {})
         is_new = key not in existing_map
 
-        # Update fields; preserve existing image if new scrape didn't find one
-        new_img = ad["img"] or d.get("Image URL", "")
+        # Update fields; preserve existing assets if new scrape didn't find them
+        new_img = ad.get("img") or d.get("Image URL", "")
+        new_embed = ad.get("embed") or d.get("Embed URL", "")
+        new_vid = ad.get("vid") or d.get("Video URL", "")
         d.update({
             "Competitor Name": ad["_name"],
             "Competitor Website": ad["_web"],
@@ -740,6 +731,8 @@ def merge_and_generate(google_ads: list, meta_ads: list):
             "Creative ID": ad["cid"],
             "Ad Format": ad["fmt"],
             "Image URL": new_img,
+            "Video URL": new_vid,
+            "Embed URL": new_embed,
             "Ad Preview URL": f"https://adstransparency.google.com/advertiser/{ad['adv_id']}/creative/{ad['cid']}",
             "Last Shown": TODAY,
             "Date Collected": TODAY,

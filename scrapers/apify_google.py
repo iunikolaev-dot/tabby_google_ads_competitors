@@ -187,17 +187,23 @@ def _build_v2_row(
         if any(ind in url_field for ind in config.HTML5_REJECT_INDICATORS):
             return None
 
-    # Rule 3: Fall back to previewUrl when crawlerbros omits the asset URL.
-    # Confirmed 2026-05-01: crawlerbros returns videoUrl/imageUrl=null for a
-    # significant fraction of ads (Monzo videos: 64/88 missing; Cash App
-    # images: 52/280 missing). previewUrl is ALWAYS populated and is either:
-    #   - A direct CDN image (s0.2mdn.net/..., tpc.googlesyndication.com/...)
-    #   - A JS-render embed (displayads-formats.googleusercontent.com/...)
-    # Either renders in the dashboard. Accepting previewUrl as a fallback
-    # lifts coverage without re-scrape cost.
-    if raw_fmt == "VIDEO" and not video_url and preview_url:
-        video_url = preview_url
-    if raw_fmt == "IMAGE" and not image_url and preview_url:
+    # Rule 3: Categorize previewUrl by host. crawlerbros returns previewUrl
+    # for nearly every ad, but in two distinct shapes:
+    #   - Direct image CDN: tpc.googlesyndication.com/archive/simgad/... ,
+    #     s0.2mdn.net/..., lh3.googleusercontent.com/... → use as Image URL
+    #   - JS-render embed:  displayads-formats.googleusercontent.com/ads/preview/
+    #     content.js?... → swap content.js → content.html (same params) and
+    #     store in Embed URL so dashboard.html iframes it
+    # Confirmed 2026-05-01: imageUrl is null for ~50–100% of global advertisers'
+    # video ads (Revolut/Wise/Monzo/Klarna). The previewUrl is what carries
+    # the renderable creative for those.
+    embed_url = ""
+    if preview_url and "displayads-formats.googleusercontent.com" in preview_url:
+        # JS embed → matched HTML page on same parameters
+        embed_url = preview_url.replace("/preview/content.js", "/preview/content.html")
+    elif preview_url and not image_url:
+        # Direct image (simgad/2mdn/lh3/etc.) used as Image URL fallback for
+        # both IMAGE-format and VIDEO-format ads when imageUrl is null.
         image_url = preview_url
 
     fmt = raw_fmt.capitalize() or ("Video" if video_url else "Image")
@@ -225,6 +231,7 @@ def _build_v2_row(
         "Ad Format": fmt,
         "Image URL": image_url,
         "Video URL": video_url,   # YouTube URL, not MP4 (§4.3.3)
+        "Embed URL": embed_url,   # iframeable when previewUrl is a JS render
         "Local Image": "",
         "Local Video": "",        # never populated for new crawlerbros results
         "Ad Preview URL": preview_url,
