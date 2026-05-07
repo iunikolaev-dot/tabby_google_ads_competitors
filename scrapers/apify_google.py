@@ -258,6 +258,7 @@ def _build_actor_input(
     advertiser_id: str,
     region: str,
     results_limit: int,
+    format_filter: str = "",
 ) -> dict:
     """
     Build crawlerbros input for a SINGLE advertiser.
@@ -270,12 +271,18 @@ def _build_actor_input(
     The region MUST be embedded in the URL itself (`?region=anywhere` or
     `?region=SA`). Passing `region` as a top-level input field also fails
     silently — same root cause, same date.
+
+    `format_filter`: optional, "VIDEO" or "IMAGE" or "TEXT". Some advertisers
+    (Klarna, Cash App, Tamara, Ziina as of 2026-05-06) return 0 items on the
+    default URL but populated results when `&format=VIDEO` is appended.
     """
     region_param = region or "anywhere"
     url = (
         f"https://adstransparency.google.com/advertiser/{advertiser_id}"
         f"?region={region_param}"
     )
+    if format_filter:
+        url += f"&format={format_filter}"
     return {
         "startUrls": [{"url": url}],
         "resultsLimit": results_limit,
@@ -287,12 +294,20 @@ def scrape_competitor(
     competitor: dict,
     batch_id: str,
     results_limit: int = DEFAULT_RESULTS_LIMIT,
+    format_filters: tuple[str, ...] = ("",),
 ) -> dict:
     """
     Run crawlerbros for a single competitor's advertiser IDs.
 
     Writes raw items to staging/google_{competitor}_{batch_id}.json before
     returning. Never raises.
+
+    `format_filters`: tuple of format strings to scrape. Default is `("",)`
+    which fires one actor run per advertiser with the plain URL. Pass
+    `("", "VIDEO")` or `("VIDEO",)` to also (or only) hit `&format=VIDEO`,
+    which is required for advertisers whose default page returns 0 ads
+    (Klarna/Cash App/Tamara/Ziina as of 2026-05-06). Items are deduped by
+    creativeId across format runs.
     """
     name = competitor.get("name", "?")
     advertiser_ids = competitor.get("google_advertiser_ids") or []
@@ -323,40 +338,55 @@ def scrape_competitor(
         return result
 
     # crawlerbros silently fails on multi-URL inputs (confirmed 2026-05-01).
-    # Loop one advertiser per actor run; aggregate stats and items.
+    # Loop one advertiser × format per actor run; aggregate stats and items.
     log.info(f"Apify Google: {name} / {len(advertiser_ids)} advertiser(s) "
-             f"/ limit={results_limit} / region={region or 'anywhere'}")
+             f"× {len(format_filters)} format(s) / limit={results_limit} "
+             f"/ region={region or 'anywhere'}")
 
     all_items: list[dict] = []
     run_ids: list[str] = []
     dataset_ids: list[str] = []
+    seen_creative_ids: set[str] = set()
 
     for aid in advertiser_ids:
-        actor_input = _build_actor_input(aid, region, results_limit)
-        ok, run_id, err = _start_run(token, actor_input)
-        if not ok:
-            result["errors"].append(f"{name}/{aid}: start failed: {err}")
-            continue
-        run_ids.append(run_id)
+        for fmt in format_filters:
+            actor_input = _build_actor_input(aid, region, results_limit, fmt)
+            ok, run_id, err = _start_run(token, actor_input)
+            if not ok:
+                result["errors"].append(f"{name}/{aid}/{fmt or 'all'}: start failed: {err}")
+                continue
+            run_ids.append(run_id)
 
-        ok, run_data, err = _wait_for_run(token, run_id)
-        if not ok:
-            result["errors"].append(f"{name}/{aid}: run failed: {err}")
-            continue
+            ok, run_data, err = _wait_for_run(token, run_id)
+            if not ok:
+                result["errors"].append(f"{name}/{aid}/{fmt or 'all'}: run failed: {err}")
+                continue
 
-        dataset_id = run_data.get("defaultDatasetId", "")
-        if not dataset_id:
-            result["errors"].append(f"{name}/{aid}: no dataset_id on finished run")
-            continue
-        dataset_ids.append(dataset_id)
+            dataset_id = run_data.get("defaultDatasetId", "")
+            if not dataset_id:
+                result["errors"].append(f"{name}/{aid}/{fmt or 'all'}: no dataset_id")
+                continue
+            dataset_ids.append(dataset_id)
 
-        ok, items, err = _fetch_dataset(token, dataset_id)
-        if not ok:
-            result["errors"].append(f"{name}/{aid}: dataset fetch failed: {err}")
-            continue
+            ok, items, err = _fetch_dataset(token, dataset_id)
+            if not ok:
+                result["errors"].append(
+                    f"{name}/{aid}/{fmt or 'all'}: dataset fetch failed: {err}"
+                )
+                continue
 
-        log.info(f"  {aid}: {len(items)} items")
-        all_items.extend(items)
+            # Dedupe across format runs by creativeId.
+            new_items = []
+            for it in items:
+                cid = (it.get("creativeId") or it.get("creative_id") or "").strip()
+                if cid and cid in seen_creative_ids:
+                    continue
+                if cid:
+                    seen_creative_ids.add(cid)
+                new_items.append(it)
+            log.info(f"  {aid}/{fmt or 'all'}: {len(items)} items "
+                     f"({len(new_items)} new after dedupe)")
+            all_items.extend(new_items)
 
     result["stats"]["run_id"] = ",".join(run_ids)
     result["stats"]["dataset_id"] = ",".join(dataset_ids)
