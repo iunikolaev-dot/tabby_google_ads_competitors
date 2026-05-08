@@ -111,14 +111,30 @@ h3.section{margin-bottom:10px;font-size:15px;font-weight:600}
   <div id="lbContent"></div>
 </div>
 
-<script src="ads_data.js"></script>
 <script>
-// Normalize schema variants: crawlerbros Global rows ship Regions[]/retired instead of Region/Status
-ADS_DATA.forEach(a=>{
-  if(!a['Region']) a['Region'] = Array.isArray(a['Regions']) && a['Regions'].length ? a['Regions'].join(', ') : 'Global';
-  if(!a['Status']) a['Status'] = a['retired']===true ? 'Inactive' : 'Active';
-});
-let sortKey='Last Shown', sortDir=-1;
+// Phase 5.3: dashboard fetches from /api/ads — no more ads_data.js download.
+// State accumulates pages on scroll; filter/sort changes reset and refetch.
+const state = {
+  ads: [],          // accumulated across pages (current filter)
+  total: 0,         // total matching current filter (server-side count)
+  stats: null,      // unfiltered top-card counts (server-computed)
+  breakdown: null,  // unfiltered per-competitor (server-computed)
+  competitors: [],  // dropdown values (one-time)
+  offset: 0,
+  limit: 200,
+  sortKey: 'last_shown',
+  sortDir: 'desc',
+  loading: false,
+  initialized: false,
+};
+
+// Display-name → SQL column name. Matches SORT_WHITELIST in api/ads.py.
+const SORT_COL = {
+  'Last Shown': 'last_shown',
+  'Started Running': 'started_running',
+  'seen_in_batches': 'seen_in_batches',
+  'Date Collected': 'date_collected',
+};
 
 // ── Helpers ──
 function cleanImageUrl(raw) {
@@ -180,63 +196,38 @@ function closeLightbox() {
   document.getElementById('lbContent').innerHTML = '';
 }
 
-// ── Filter & sort ──
-function getFiltered(){
-  const cat=document.getElementById('fCat').value,comp=document.getElementById('fComp').value,reg=document.getElementById('fReg').value,fmt=document.getElementById('fFmt').value,plat=document.getElementById('fPlat').value,status=document.getElementById('fStatus').value,from=document.getElementById('fFrom').value,to=document.getElementById('fTo').value,q=document.getElementById('fSearch').value.toLowerCase();
-  return ADS_DATA.filter(a=>{
-    if(cat&&(a['Category']||'GCC')!==cat)return false;
-    if(comp&&a['Competitor Name']!==comp)return false;
-    if(reg&&a['Region']!==reg)return false;
-    if(fmt&&a['Ad Format']!==fmt)return false;
-    if(plat&&(a['Platform']||'Google Ads')!==plat)return false;
-    if(status&&(a['Status']||'Active')!==status)return false;
-    const ls=a['Last Shown']||'';
-    if(from&&ls&&ls<from)return false;
-    if(to&&ls&&ls>to)return false;
-    if(q&&!Object.values(a).join(' ').toLowerCase().includes(q))return false;
-    return true;
-  }).sort((a,b)=>{const va=a[sortKey]||'',vb=b[sortKey]||'';return va<vb?sortDir:va>vb?-sortDir:0});
-}
-
 // ── Render ──
 function renderStats(){
-  const t=ADS_DATA.length,c=new Set(ADS_DATA.map(a=>a['Competitor Name'])).size;
-  const v=ADS_DATA.filter(a=>a['Ad Format']==='Video').length;
-  const im=ADS_DATA.filter(a=>a['Ad Format']==='Image').length;
-  const tx=ADS_DATA.filter(a=>a['Ad Format']==='Text').length;
-  const n=ADS_DATA.filter(a=>a['New This Week']==='NEW').length;
-  const gAds=ADS_DATA.filter(a=>(a['Platform']||'Google Ads')==='Google Ads').length;
-  const mAds=ADS_DATA.filter(a=>a['Platform']==='Meta Ads').length;
-  const act=ADS_DATA.filter(a=>(a['Status']||'Active')==='Active').length;
-  const inact=t-act;
-  const d=[...new Set(ADS_DATA.map(a=>a['Date Collected']).filter(Boolean))].sort().reverse();
+  const s = state.stats || {};
+  const t = s.total||0, act=s.active||0, inact=s.inactive||0;
+  const v=s.video||0, im=s.image||0, n=s.new_this_week||0;
+  const gAds=s.google||0, mAds=s.meta||0;
+  const c=state.competitors.length;
+  const totActive = act || 1; // for percentages on active-row
   document.getElementById('statsRow').innerHTML=`
     <div class="stat-card"><div class="label">Total Ads</div><div class="value">${t}</div><div class="sub">${c} competitors</div></div>
     <div class="stat-card"><div class="label">Active</div><div class="value" style="color:var(--green)">${act}</div><div class="sub">${inact} inactive</div></div>
-    <div class="stat-card"><div class="label">Google Ads</div><div class="value" style="color:#60a5fa">${gAds}</div><div class="sub">${t?(gAds/t*100).toFixed(0):0}%</div></div>
-    <div class="stat-card"><div class="label">Meta Ads</div><div class="value" style="color:#a78bfa">${mAds}</div><div class="sub">${t?(mAds/t*100).toFixed(0):0}%</div></div>
-    <div class="stat-card"><div class="label">Video</div><div class="value" style="color:#f87171">${v}</div><div class="sub">${t?(v/t*100).toFixed(0):0}%</div></div>
-    <div class="stat-card"><div class="label">Image</div><div class="value" style="color:#60a5fa">${im}</div><div class="sub">${t?(im/t*100).toFixed(0):0}%</div></div>
+    <div class="stat-card"><div class="label">Google Ads</div><div class="value" style="color:#60a5fa">${gAds}</div><div class="sub">${Math.round(100*gAds/totActive)}% of active</div></div>
+    <div class="stat-card"><div class="label">Meta Ads</div><div class="value" style="color:#a78bfa">${mAds}</div><div class="sub">${Math.round(100*mAds/totActive)}% of active</div></div>
+    <div class="stat-card"><div class="label">Video</div><div class="value" style="color:#f87171">${v}</div><div class="sub">${Math.round(100*v/totActive)}% of active</div></div>
+    <div class="stat-card"><div class="label">Image</div><div class="value" style="color:#60a5fa">${im}</div><div class="sub">${Math.round(100*im/totActive)}% of active</div></div>
     <div class="stat-card"><div class="label">New This Week</div><div class="value" style="color:var(--green)">${n}</div><div class="sub">first seen</div></div>`;
-  document.getElementById('lastUpdated').textContent=d[0]?'Last scraped: '+d[0]:'';
+  document.getElementById('lastUpdated').textContent = s.last_scraped ? 'Last scraped: '+s.last_scraped : '';
 }
 
 function renderBreakdown(){
-  const m={};
-  ADS_DATA.forEach(a=>{const plat=a['Platform']||'Google Ads';const k=a['Competitor Name']+'|'+plat;if(!m[k])m[k]={name:a['Competitor Name'],platform:plat,category:a['Category']||'GCC',website:a['Competitor Website'],v:0,i:0,t:0,total:0};m[k][a['Ad Format']==='Video'?'v':a['Ad Format']==='Image'?'i':'t']++;m[k].total++});
-  const mx=Math.max(...Object.values(m).map(c=>c.total),1);
-  const all=Object.values(m).sort((a,b)=>b.total-a.total);
-  const gcc=all.filter(c=>c.category!=='Global');
-  const global=all.filter(c=>c.category==='Global');
+  const all = state.breakdown || [];
+  if (!all.length) { document.getElementById('breakdown').innerHTML=''; return; }
+  const mx = Math.max(...all.map(c=>c.total), 1);
+  const gcc = all.filter(c => c.category !== 'Global');
+  const global = all.filter(c => c.category === 'Global');
   function renderCards(cards){return cards.map(c=>{
     const platBadge=c.platform==='Meta Ads'?'<span class="badge" style="background:rgba(167,139,250,.15);color:#a78bfa">META</span>':'<span class="badge" style="background:rgba(59,130,246,.15);color:#60a5fa">GOOGLE</span>';
     return `
     <div class="breakdown-card">
       <div class="name">${c.name} ${platBadge}</div>
-      <div class="website"><a href="${c.website}" target="_blank">${c.website}</a></div>
-      <div class="bar-row">Video: ${c.v}<div class="bar bar-v"><div class="fill" style="width:${c.v/mx*100}%"></div></div></div>
-      <div class="bar-row">Image: ${c.i}<div class="bar bar-i"><div class="fill" style="width:${c.i/mx*100}%"></div></div></div>
-      ${c.platform!=='Meta Ads'?`<div class="bar-row">Text: ${c.t}<div class="bar bar-t"><div class="fill" style="width:${c.t/mx*100}%"></div></div></div>`:''}
+      <div class="bar-row">Video: ${c.video}<div class="bar bar-v"><div class="fill" style="width:${c.video/mx*100}%"></div></div></div>
+      <div class="bar-row">Image: ${c.image}<div class="bar bar-i"><div class="fill" style="width:${c.image/mx*100}%"></div></div></div>
       <div style="margin-top:6px;font-size:13px;font-weight:600">${c.total} total</div>
     </div>`}).join('')}
   document.getElementById('breakdown').innerHTML=
@@ -244,8 +235,8 @@ function renderBreakdown(){
     '<h3 class="section" style="grid-column:1/-1;margin-top:16px">Global</h3>'+renderCards(global);
 }
 
-function renderGrid(ads){
-  document.getElementById('gridView').innerHTML=ads.map(ad=>{
+function renderGrid(ads, append){
+  const html = ads.map(ad=>{
     const img=cleanImageUrl(ad['Image URL']);
     const vid=cleanVideoUrl(ad['Video URL']);
     const vidOk=vid&&!isVideoUrlExpired(vid);
@@ -257,11 +248,11 @@ function renderGrid(ads){
     const isVideo=ad['Ad Format']==='Video';
     if(img){
       // Show image thumbnail — for video ads, add play overlay
-      media=`<img src="${img}" alt="Ad" onerror="this.parentElement.innerHTML='<div class=no-preview><div style=font-size:32px;margin-bottom:6px>${fmtIcon}</div><div>${ad['Ad Format']} ad</div></div>'">`;
+      media=`<img loading="lazy" src="${img}" alt="Ad" onerror="this.parentElement.innerHTML='<div class=no-preview><div style=font-size:32px;margin-bottom:6px>${fmtIcon}</div><div>${ad['Ad Format']} ad</div></div>'">`;
       if(isVideo) media+=`<div class="play-overlay"></div>`;
     } else if(ad['Screenshot']){
       // Show screenshot taken from Transparency Center
-      media=`<img src="${ad['Screenshot']}" alt="Ad screenshot" onerror="this.parentElement.innerHTML='<div class=no-preview><div style=font-size:32px;margin-bottom:6px>${fmtIcon}</div><div>${ad['Ad Format']} ad</div></div>'">`;
+      media=`<img loading="lazy" src="${ad['Screenshot']}" alt="Ad screenshot" onerror="this.parentElement.innerHTML='<div class=no-preview><div style=font-size:32px;margin-bottom:6px>${fmtIcon}</div><div>${ad['Ad Format']} ad</div></div>'">`;
       if(isVideo) media+=`<div class="play-overlay"></div>`;
     } else if(ad['Embed URL']){
       // Trust upstream classification — pipeline only stores iframeable URLs
@@ -284,10 +275,12 @@ function renderGrid(ads){
           <a href="${preview}" target="_blank">${ad['Platform']==='Meta Ads'?'Ad Library':'Transparency Center'}</a>${isVideo&&vid?' | <a href="'+preview+'" target="_blank">Video</a>':''}</div>
       </div></div>`;
   }).join('');
+  const el = document.getElementById('gridView');
+  if (append) el.insertAdjacentHTML('beforeend', html); else el.innerHTML = html;
 }
 
-function renderTable(ads){
-  document.getElementById('tBody').innerHTML=ads.map(ad=>{
+function renderTable(ads, append){
+  const html = ads.map(ad=>{
     const img=cleanImageUrl(ad['Image URL']);
     const vid=cleanVideoUrl(ad['Video URL']);
     const preview=ad['Ad Preview URL']||'';
@@ -297,26 +290,127 @@ function renderTable(ads){
     return `<tr>
       <td><strong>${ad['Competitor Name']}</strong>${isNew?' <span class="badge badge-new">NEW</span>':''}</td>
       <td>${platBadge}</td><td>${rb(ad['Region'])}</td><td>${fb(ad['Ad Format'])}</td><td>${(ad['Status']||'Active')==='Active'?'<span style="color:var(--green)">Active</span>':'<span style="color:var(--muted)">Inactive</span>'}</td><td>${ad['Started Running']||''}</td><td>${ad['Last Shown']||''}</td>
-      <td>${img?`<img class="thumb" src="${img}" onclick="openLightbox('${img}','','')" style="cursor:zoom-in" onerror="this.style.display='none'">`:`<a href="${preview}" target="_blank" style="font-size:11px">Preview</a>`}</td>
+      <td>${img?`<img class="thumb" loading="lazy" src="${img}" onclick="openLightbox('${img}','','')" style="cursor:zoom-in" onerror="this.style.display='none'">`:`<a href="${preview}" target="_blank" style="font-size:11px">Preview</a>`}</td>
       <td>${img?`<a href="${img}" target="_blank">View</a>`:'-'}</td>
       <td>${vid?`<a href="${vid}" target="_blank">Play</a>`:'-'}</td>
       <td><a href="${preview}" target="_blank">View</a></td>
       <td style="font-size:11px;color:var(--muted)">${ad['Creative ID']||''}</td></tr>`;
   }).join('');
+  const el = document.getElementById('tBody');
+  if (append) el.insertAdjacentHTML('beforeend', html); else el.innerHTML = html;
 }
 
-function render(){const ads=getFiltered();document.getElementById('cnt').textContent=ads.length;renderGrid(ads);renderTable(ads)}
+// ── API loader ──
+function buildQuery(){
+  const q = new URLSearchParams();
+  const map = {fCat:'category', fComp:'competitor', fReg:'region', fFmt:'format',
+               fPlat:'platform', fStatus:'status', fFrom:'from', fTo:'to', fSearch:'search'};
+  for (const [id, name] of Object.entries(map)) {
+    const v = (document.getElementById(id).value || '').trim();
+    if (v) q.set(name, v);
+  }
+  q.set('limit', state.limit);
+  q.set('offset', state.offset);
+  q.set('sort', state.sortKey);
+  q.set('dir', state.sortDir);
+  return q.toString();
+}
 
-// ── Init ──
-renderStats();renderBreakdown();
-const sel=document.getElementById('fComp');[...new Set(ADS_DATA.map(a=>a['Competitor Name']))].sort().forEach(n=>{const o=document.createElement('option');o.value=n;o.textContent=n;sel.appendChild(o)});
-render();
-['fCat','fComp','fReg','fFmt','fPlat','fStatus','fFrom','fTo'].forEach(id=>document.getElementById(id).addEventListener('change',render));
-document.getElementById('fSearch').addEventListener('input',render);
-document.getElementById('btnGrid').addEventListener('click',function(){this.classList.add('active');document.getElementById('btnTable').classList.remove('active');document.getElementById('gridView').classList.remove('hidden');document.getElementById('tableView').classList.add('hidden')});
-document.getElementById('btnTable').addEventListener('click',function(){this.classList.add('active');document.getElementById('btnGrid').classList.remove('active');document.getElementById('tableView').classList.remove('hidden');document.getElementById('gridView').classList.add('hidden')});
-document.querySelectorAll('th[data-k]').forEach(th=>th.addEventListener('click',()=>{const k=th.dataset.k;if(sortKey===k)sortDir*=-1;else{sortKey=k;sortDir=-1}render()}));
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeLightbox()});
+async function loadFromApi(reset){
+  if (state.loading) return;
+  state.loading = true;
+  if (reset) { state.offset = 0; state.ads = []; }
+  try {
+    const resp = await fetch('/api/ads?' + buildQuery());
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    if (reset) state.ads = data.ads; else state.ads = state.ads.concat(data.ads);
+    state.offset += data.ads.length;
+    state.total = data.total;
+    state.stats = data.stats;
+    state.breakdown = data.breakdown;
+    if (!state.competitors.length) state.competitors = data.competitors || [];
+    document.getElementById('cnt').textContent = state.total;
+    renderStats();
+    if (reset) renderBreakdown();
+    renderGrid(data.ads, !reset);
+    renderTable(data.ads, !reset);
+    updateSentinel();
+  } catch (e) {
+    document.getElementById('gridView').innerHTML =
+      `<div style="grid-column:1/-1;padding:24px;color:var(--red);text-align:center">Failed to load: ${e.message}</div>`;
+  } finally {
+    state.loading = false;
+  }
+}
+
+// ── Pagination sentinel (IntersectionObserver) ──
+let sentinelEl = null, observer = null;
+function ensureSentinel(){
+  if (sentinelEl) return sentinelEl;
+  sentinelEl = document.createElement('div');
+  sentinelEl.id = 'sentinel';
+  sentinelEl.style.cssText = 'grid-column:1/-1;height:40px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px';
+  document.getElementById('gridView').after(sentinelEl);
+  observer = new IntersectionObserver((entries)=>{
+    if (entries[0].isIntersecting && !state.loading && state.offset < state.total) {
+      loadFromApi(false);
+    }
+  }, { rootMargin: '400px' });
+  observer.observe(sentinelEl);
+  return sentinelEl;
+}
+function updateSentinel(){
+  const s = ensureSentinel();
+  if (state.offset < state.total) s.textContent = `Loading more… (${state.offset} / ${state.total})`;
+  else s.textContent = state.total ? `All ${state.total} loaded` : '';
+}
+
+// ── Bootstrap ──
+async function init(){
+  // Pre-populate competitor dropdown so the UI feels populated immediately.
+  // The first /api/ads call returns the canonical list; we fill on response.
+  await loadFromApi(true);
+  if (!state.initialized) {
+    const sel = document.getElementById('fComp');
+    for (const n of state.competitors) {
+      const o = document.createElement('option');
+      o.value = n; o.textContent = n;
+      sel.appendChild(o);
+    }
+    state.initialized = true;
+  }
+}
+init();
+
+// ── Filter / sort / view-toggle wiring ──
+let _searchTimer;
+['fCat','fComp','fReg','fFmt','fPlat','fStatus','fFrom','fTo'].forEach(id=>{
+  document.getElementById(id).addEventListener('change', ()=>loadFromApi(true));
+});
+document.getElementById('fSearch').addEventListener('input', ()=>{
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(()=>loadFromApi(true), 300);  // debounce
+});
+document.getElementById('btnGrid').addEventListener('click', function(){
+  this.classList.add('active'); document.getElementById('btnTable').classList.remove('active');
+  document.getElementById('gridView').classList.remove('hidden');
+  document.getElementById('tableView').classList.add('hidden');
+});
+document.getElementById('btnTable').addEventListener('click', function(){
+  this.classList.add('active'); document.getElementById('btnGrid').classList.remove('active');
+  document.getElementById('tableView').classList.remove('hidden');
+  document.getElementById('gridView').classList.add('hidden');
+});
+document.querySelectorAll('th[data-k]').forEach(th => th.addEventListener('click', ()=>{
+  const k = th.dataset.k;
+  const col = SORT_COL[k];
+  if (!col) return;  // only sortable columns are in SORT_COL
+  if (state.sortKey === col) state.sortDir = state.sortDir === 'desc' ? 'asc' : 'desc';
+  else { state.sortKey = col; state.sortDir = 'desc'; }
+  loadFromApi(true);
+}));
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeLightbox(); });
 
 </script>
 </body>

@@ -142,7 +142,6 @@ h1{font-size:24px;font-weight:700;margin-bottom:4px} h1 span{color:var(--accent-
   </div>
 </div>
 
-<script src="ads_data.js"></script>
 <script>
 const selComp = document.getElementById('selComp');
 const selPlat = document.getElementById('selPlat');
@@ -156,32 +155,43 @@ const adSlider = document.getElementById('adSlider');
 const sliderVal = document.getElementById('sliderVal');
 const result = document.getElementById('result');
 
-// Populate competitor dropdown
-const names = [...new Set(ADS_DATA.map(a => a['Competitor Name']))].sort();
-names.forEach(n => {
-  const o = document.createElement('option');
-  o.value = n; o.textContent = n;
-  selComp.appendChild(o);
-});
-
 let rankedAds = []; // sorted by run duration
+let competitorsLoaded = false;
 
-function getFiltered() {
+// Phase 5.3: pull data from /api/ads instead of the legacy 7.5MB JSON dump.
+// fetchAds() handles both the initial competitor-list load and per-filter
+// reloads. Limit 500 is plenty: the picker only shows top 20 by ranking.
+async function fetchAds() {
   const comp = selComp.value;
-  const plat = selPlat.value;
-  const fmt = selFormat.value;
-  const from = dateFrom.value;
-  const to = dateTo.value;
-  if (!comp) return [];
-  return ADS_DATA.filter(a => {
-    if (a['Competitor Name'] !== comp) return false;
-    if (plat && (a['Platform'] || 'Google Ads') !== plat) return false;
-    if (fmt && a['Ad Format'] !== fmt) return false;
-    const adDate = a['Started Running'] || a['Last Shown'] || '';
-    if (from && adDate < from) return false;
-    if (to && adDate > to) return false;
-    return true;
-  });
+  // Without a competitor selected we just need the dropdown list — request 1 row.
+  const params = new URLSearchParams();
+  if (comp) {
+    params.set('competitor', comp);
+    params.set('limit', '500');
+    if (selPlat.value) params.set('platform', selPlat.value);
+    if (selFormat.value) params.set('format', selFormat.value);
+    if (dateFrom.value) params.set('from', dateFrom.value);
+    if (dateTo.value) params.set('to', dateTo.value);
+  } else {
+    params.set('limit', '1');
+  }
+  try {
+    const resp = await fetch('/api/ads?' + params.toString());
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    if (!competitorsLoaded && data.competitors) {
+      data.competitors.forEach(n => {
+        const o = document.createElement('option');
+        o.value = n; o.textContent = n;
+        selComp.appendChild(o);
+      });
+      competitorsLoaded = true;
+    }
+    return comp ? data.ads : [];
+  } catch (e) {
+    console.error('fetchAds failed:', e);
+    return [];
+  }
 }
 
 function rankAds(ads) {
@@ -205,8 +215,8 @@ function rankAds(ads) {
   });
 }
 
-function updateUI() {
-  const ads = getFiltered();
+async function updateUI() {
+  const ads = await fetchAds();
   rankedAds = rankAds(ads);
 
   if (ads.length === 0) {
@@ -284,6 +294,10 @@ dateFrom.addEventListener('change', updateUI);
 dateTo.addEventListener('change', updateUI);
 adSlider.addEventListener('input', updateSelection);
 
+// Initial fetch populates the competitor dropdown (ads stay empty until a
+// competitor is picked).
+updateUI();
+
 // Analyze
 btnAnalyze.addEventListener('click', async () => {
   const count = parseInt(adSlider.value);
@@ -309,22 +323,22 @@ btnAnalyze.addEventListener('click', async () => {
 - **Video**: ${videos.length}, **Image**: ${images.length}
 - **Platform**: ${plat}
 - **Website**: ${selected[0]['Competitor Website'] || 'N/A'}
-- **Selection method**: Top ${count} longest-running ads (longest running = likely best performers)
+- **Selection method**: Top ${count} most-sustained ads (sorted by # of weekly scrape batches the ad has been observed in — strongest signal of real performance we have)
 
-## Ads to analyze (sorted by run duration)
+## Ads to analyze (sorted by sustained presence across scrape batches)
 `;
   selected.forEach((a, i) => {
     adsSummary += `\n### Ad ${i + 1} — ${a['Ad Format']}
 - Running: ${a._days} days (${a['Started Running'] || '?'} to ${a['Last Shown'] || '?'})`;
     if (a['Active Status']) adsSummary += `\n- Status: ${a['Active Status']}`;
-    if (a['Landing Page / Destination URL']) adsSummary += `\n- Landing page: ${a['Landing Page / Destination URL']}`;
+    if (a['Landing Page']) adsSummary += `\n- Landing page: ${a['Landing Page']}`;
     if (a['Region']) adsSummary += `\n- Region/Publishers: ${a['Region']}`;
     if (a['Image URL']) adsSummary += `\n- Preview: ${a['Image URL']}`;
     if (a['Video URL']) adsSummary += `\n- Video: ${a['Video URL']}`;
   });
 
   // Landing page patterns
-  const landingPages = [...new Set(selected.map(a => a['Landing Page / Destination URL']).filter(Boolean))];
+  const landingPages = [...new Set(selected.map(a => a['Landing Page']).filter(Boolean))];
   if (landingPages.length > 0) {
     adsSummary += `\n\n## Landing Pages Used (${landingPages.length} unique)\n`;
     landingPages.forEach(lp => { adsSummary += `- ${lp}\n`; });

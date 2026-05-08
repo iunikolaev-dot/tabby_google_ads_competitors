@@ -860,34 +860,29 @@ def merge_and_generate(google_ads: list, meta_ads: list):
     total_active = sum(1 for d in all_data if d.get("Status") == "Active")
     log.info(f"  Total: {total_google} Google + {total_meta} Meta = {len(all_data)} ads ({total_active} active)")
 
-    # Write files — dual-write to SQLite (new SoT, audit step 5.1) AND the
-    # legacy JSON file the dashboard still loads. Phase 5.3 will drop JSON.
+    # Phase 5.3: SQLite is now the only SoT served to the dashboard via
+    # /api/ads. The legacy public/ads_data.js write is gone — the pages
+    # (dashboard.html and test-analyze.html) fetch from the API.
+    # We keep ads_data.json at the repo root as a debugging side-effect
+    # (it's gitignored; analysts can grep it locally without firing up sqlite).
     os.makedirs(PUBLIC_DIR, exist_ok=True)
-    js_content = "const ADS_DATA = " + json.dumps(all_data, ensure_ascii=False) + ";"
-    with open(ADS_JS_PATH, "w") as f:
-        f.write(js_content)
-    with open(os.path.join(SCRIPT_DIR, "ads_data.js"), "w") as f:
-        f.write(js_content)
     with open(ADS_JSON_PATH, "w") as f:
         json.dump(all_data, f, indent=2, ensure_ascii=False)
 
-    # SQLite write — full table replace, then upsert. Cheap on 5–10k rows.
-    try:
-        from pipeline import sqlite_store
-        conn = sqlite_store.open_db()
-        sqlite_store.init_db(conn)
-        # Wipe then re-insert. Avoids stale rows that no longer exist in
-        # all_data (we already mark Inactive in merge; deletes happen via
-        # cleanup script, not the main pipeline).
-        conn.execute("DELETE FROM ads")
-        n_sql = sqlite_store.upsert_rows(conn, all_data)
-        conn.close()
-        log.info(f"  Wrote {n_sql:,} rows to {sqlite_store.DB_PATH.name}")
-    except Exception as e:
-        log.warning(f"  SQLite write failed: {e} — JSON still written, "
-                    f"pipeline continues")
+    from pipeline import sqlite_store
+    conn = sqlite_store.open_db()
+    sqlite_store.init_db(conn)
+    # Full table replace: avoids leftover rows that no longer exist in
+    # all_data. Cleanups (the only deletion path) live in
+    # scripts/cleanup_broken_state.py and are run by hand.
+    conn.execute("DELETE FROM ads")
+    n_sql = sqlite_store.upsert_rows(conn, all_data)
+    # Checkpoint WAL so the committed .db file contains the data; otherwise
+    # the WAL sidecar is gitignored and the deployed DB lags by one run.
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    conn.close()
+    log.info(f"  Wrote {n_sql:,} rows to {sqlite_store.DB_PATH.name}")
 
-    log.info(f"  Dashboard files written")
     return all_data
 
 
