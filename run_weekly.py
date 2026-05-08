@@ -358,6 +358,7 @@ def scrape_google_ads_apify() -> list:
                 "img": row.get("Image URL", "") or "",
                 "embed": row.get("Embed URL", "") or "",
                 "vid": row.get("Video URL", "") or "",
+                "first_shown": row.get("First Shown") or "",
                 "_name": display_name,
                 "_web": _WEBSITES.get(display_name, ""),
                 "_cat": cat_v1,
@@ -739,12 +740,20 @@ def merge_and_generate(google_ads: list, meta_ads: list):
             "Platform": "Google Ads",
             "Status": "Active",
         })
+        # History tracking — see audit step 2
+        d["last_seen_batch_id"] = BATCH_ID
+        d["miss_streak"] = 0
         if is_new:
             d["New This Week"] = "NEW"
-            d["Started Running"] = d.get("Started Running") or TODAY
+            # Started Running must come from the source (crawlerbros firstShown),
+            # NOT TODAY — TODAY is when WE first saw it, not when the ad started.
+            d["Started Running"] = ad.get("first_shown") or d.get("Started Running") or TODAY
+            d["seen_in_batches"] = 1
+            d["first_seen_batch_id"] = BATCH_ID
             new_google += 1
         else:
             d["New This Week"] = ""
+            d["seen_in_batches"] = (d.get("seen_in_batches") or 1) + 1
             updated_google += 1
         existing_map[key] = d
 
@@ -757,53 +766,69 @@ def merge_and_generate(google_ads: list, meta_ads: list):
         is_new = key not in existing_map
         d = existing_map.get(key, {})
 
-        # Preserve Local Image if it exists on disk; prefer new Image URL
-        existing_local = d.get("Local Image", "")
-        d.update(ad)
-        if ad.get("Local Image"):
-            d["Local Image"] = ad["Local Image"]
-        elif existing_local:
-            d["Local Image"] = existing_local
+        # Preserve existing history fields before update overwrites them
+        prev_seen = d.get("seen_in_batches") or 0
+        prev_first_batch = d.get("first_seen_batch_id") or ""
 
+        d.update(ad)
+        # Drop the dead Local Image / Local Video fields (cleanup step 1
+        # already stripped them; new Apify rows shouldn't reintroduce them)
+        d.pop("Local Image", None)
+        d.pop("Local Video", None)
         d["Status"] = "Active"
+
+        # History tracking
+        d["last_seen_batch_id"] = BATCH_ID
+        d["miss_streak"] = 0
         if is_new:
             d["New This Week"] = "NEW"
+            d["seen_in_batches"] = 1
+            d["first_seen_batch_id"] = BATCH_ID
             new_meta += 1
         else:
             d["New This Week"] = ""
+            d["seen_in_batches"] = prev_seen + 1
+            d["first_seen_batch_id"] = prev_first_batch or BATCH_ID
             updated_meta += 1
         existing_map[key] = d
 
     # ── Recompute Status for ads NOT seen this run ───────────────────
+    # Don't mark Inactive on a single absence — that's too sensitive to
+    # crawlerbros's silent-zero days. Inactive = (missed >=2 consecutive runs)
+    # OR (Last Shown > 30 days ago — hard ceiling for ancient stragglers).
     today_date = datetime.date.fromisoformat(TODAY)
     inactive_count = 0
     still_active_count = 0
+    grace_count = 0
     for key, d in existing_map.items():
         if key in seen_this_run:
             continue
-        # Not seen this run — recompute status from Last Shown
-        last_shown = d.get("Last Shown", "")
         d["New This Week"] = ""
+        d["miss_streak"] = (d.get("miss_streak") or 0) + 1
+
+        last_shown = d.get("Last Shown", "")
+        days_ago = 9999
         if last_shown:
             try:
                 ls_date = datetime.date.fromisoformat(last_shown.split(" ")[0])
                 days_ago = (today_date - ls_date).days
-                if days_ago <= 7:
-                    d["Status"] = "Active"
-                    still_active_count += 1
-                else:
-                    d["Status"] = "Inactive"
-                    inactive_count += 1
             except (ValueError, TypeError):
-                d["Status"] = "Inactive"
-                inactive_count += 1
-        else:
+                pass
+
+        # Hard ceiling — anything 30+ days stale is Inactive regardless of streak
+        if days_ago > 30 or d["miss_streak"] >= 2:
             d["Status"] = "Inactive"
             inactive_count += 1
+        else:
+            d["Status"] = "Active"
+            if d["miss_streak"] == 1:
+                grace_count += 1
+            still_active_count += 1
 
     log.info(f"  Google Ads: {new_google} new, {updated_google} updated (re-seen)")
     log.info(f"  Meta Ads: {new_meta} new, {updated_meta} updated (re-seen)")
-    log.info(f"  Not seen this run: {still_active_count} still active, {inactive_count} marked inactive")
+    log.info(f"  Not seen this run: {still_active_count} still Active "
+             f"({grace_count} in 1-miss grace), {inactive_count} marked Inactive")
 
     # Final list — nothing dropped, full history preserved
     all_data = list(existing_map.values())

@@ -185,6 +185,10 @@ function getFiltered() {
 }
 
 function rankAds(ads) {
+  // Top performer = the ad we've seen running across the most weekly scrapes.
+  // Single-day duration (Started Running == Last Shown) is unreliable noise —
+  // a true long-runner shows up across multiple scrape batches.
+  // Tiebreak: longer Started→Last span. Final fallback: most recent Last Shown.
   return ads.map(a => {
     const start = a['Started Running'] || a['Last Shown'] || '';
     const end = a['Last Shown'] || '';
@@ -192,8 +196,13 @@ function rankAds(ads) {
     if (start && end) {
       days = Math.max(0, Math.round((new Date(end) - new Date(start)) / 86400000));
     }
-    return { ...a, _days: days };
-  }).sort((a, b) => b._days - a._days);
+    const seen = a['seen_in_batches'] || 1;
+    return { ...a, _days: days, _seen: seen };
+  }).sort((a, b) => {
+    if (b._seen !== a._seen) return b._seen - a._seen;
+    if (b._days !== a._days) return b._days - a._days;
+    return (b['Last Shown'] || '').localeCompare(a['Last Shown'] || '');
+  });
 }
 
 function updateUI() {
@@ -243,7 +252,7 @@ function updateSelection() {
   const selImgWithPreview = selected.filter(hasPreview).length;
 
   document.getElementById('selNote').textContent =
-    `${count} of ${rankedAds.length} ads will be analyzed (${selVideos} video, ${selImages} image, ${selImgWithPreview} with visual preview). Sorted by run duration — longest first.`;
+    `${count} of ${rankedAds.length} ads will be analyzed (${selVideos} video, ${selImages} image, ${selImgWithPreview} with visual preview). Sorted by # of scrape batches the ad was seen in (longest sustained = best signal of real performance).`;
 
   // Show preview grid with selected/dimmed states
   const grid = document.getElementById('previewGrid');
@@ -258,10 +267,12 @@ function updateSelection() {
     const media = img
       ? `<img src="${img}" onerror="this.parentElement.style.display='none'" alt="Ad">`
       : `<iframe src="${embed}" loading="lazy" sandbox="allow-scripts allow-same-origin" scrolling="no" style="width:100%;height:85px;border:none;display:block;pointer-events:none"></iframe>`;
+    // Badge bottom-right shows seen_in_batches (real signal). _days is the
+    // reported run-window which is often noise on single-batch ads.
     return `<div class="preview-item ${isSelected ? 'selected' : 'dimmed'}">
       ${media}
       ${isSelected ? `<span class="badge">#${rank+1}</span>` : ''}
-      <span class="days">${a._days}d</span>
+      <span class="days" title="seen in ${a._seen} scrape batches; ad-reported window ${a._days}d">${a._seen}×</span>
     </div>`;
   }).join('');
 }
