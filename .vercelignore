@@ -2,8 +2,6 @@
 *.py
 *.pyc
 __pycache__/
-pipeline/
-scrapers/
 _deprecated/
 backups/
 staging/
@@ -12,6 +10,13 @@ metrics/
 v2/
 debug_responses/
 debug_firecrawl/
+
+# EXCEPT: serverless function code that Vercel actually runs.
+# api/*.py is the function entry; pipeline/sqlite_store.py won't be imported
+# by api/ads.py (function is self-contained), but we keep it un-ignored in
+# case future functions want it.
+!api/*.py
+!pipeline/sqlite_store.py
 
 # Data files that aren't served
 *.json
