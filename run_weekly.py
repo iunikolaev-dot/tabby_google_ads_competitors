@@ -55,6 +55,11 @@ FIRECRAWL_API_KEY = ENV.get("FIRECRAWL_API_KEY", "")
 APIFY_TOKEN = ENV.get("APIFY_TOKEN", "")
 OPENAI_API_KEY = ENV.get("OPENAI_API_KEY", "")
 
+# Observability — append spend ledger + per-run summary
+import sys as _sys
+_sys.path.insert(0, SCRIPT_DIR)
+from pipeline.observability import record_spend, write_run_metrics, RunTimer  # noqa: E402
+
 # ── Constants ────────────────────────────────────────────────────────────────
 PUBLIC_DIR = os.path.join(SCRIPT_DIR, "public")
 ADS_JS_PATH = os.path.join(PUBLIC_DIR, "ads_data.js")
@@ -341,8 +346,13 @@ def scrape_google_ads_apify() -> list:
 
         rows = result["rows"]
         cost = result["stats"]["estimated_cost_usd"]
+        items = result["stats"]["items_fetched"]
         total_cost += cost
         log.info(f"    Got {len(rows)} ads (~${cost:.2f})")
+        record_spend(BATCH_ID, "apify_google/crawlerbros", comp["name"],
+                     items_fetched=items, est_cost_usd=cost,
+                     extra={"rows_built": len(rows),
+                            "errors": result.get("errors", [])[:3]})
 
         is_global = comp.get("category") == "Global"
         region_v1 = "Global" if is_global else (comp.get("google_region") or "")
@@ -566,6 +576,17 @@ def scrape_meta_ads() -> list:
         offset += 100
 
     log.info(f"  Fetched {len(items)} items from Apify")
+
+    # Cost: Curious Coder's Facebook Ads Library Scraper bills per item.
+    # Empirical rate from recent runs: ~$0.0014 per item (3,109 items → $4.30).
+    # This is a heuristic — if the actor's pricing changes, update the rate.
+    EST_RATE_PER_ITEM = 0.0014
+    est_cost = round(len(items) * EST_RATE_PER_ITEM, 2)
+    record_spend(BATCH_ID, "apify_meta/curious_coder",
+                 competitor="(all_meta_pages)",
+                 items_fetched=len(items),
+                 est_cost_usd=est_cost,
+                 extra={"actor_run_id": run_id, "page_count": len(META_PAGE_MAP)})
 
     # Transform to our format
     meta_ads = []
@@ -897,34 +918,152 @@ def deploy_vercel():
 # MAIN
 # ═════════════════════════════════════════════════════════════════════════════
 
+def _coverage_pct(rows: list) -> float:
+    """% of active rows with renderable preview source (Image URL or Embed URL)."""
+    actives = [r for r in rows if (r.get("Status") or "Active") == "Active"]
+    if not actives:
+        return 0.0
+    ok = sum(1 for r in actives if r.get("Image URL") or r.get("Embed URL"))
+    return round(100 * ok / len(actives), 1)
+
+
+def _validate_preview_sample(all_data: list, batch_id: str) -> dict:
+    """HEAD-check a sample of rows so we know if the merge produced a healthy SoT.
+
+    Sample = all rows newly added this batch + 50 random Active rows.
+    Mutates the sampled rows' preview_status/preview_checked_at fields.
+    Returns the stats dict from preview_validator.
+    """
+    try:
+        from pipeline.preview_validator import validate_rows
+    except Exception as e:
+        log.warning(f"  preview_validator unavailable: {e}")
+        return {}
+
+    import random as _rand
+    new_ids = {
+        r.get("Creative ID")
+        for r in all_data
+        if r.get("first_seen_batch_id") == batch_id and r.get("Creative ID")
+    }
+    actives = [r for r in all_data if (r.get("Status") or "Active") == "Active"]
+    new_active = [r for r in actives if r.get("Creative ID") in new_ids]
+    other_active = [r for r in actives if r.get("Creative ID") not in new_ids]
+
+    # Cap each cohort at 50 to keep HEAD checks under ~2 min total. A fresh
+    # scrape can add 3k+ new rows; HEAD-checking all of them is too slow.
+    NEW_CAP, OTHER_CAP = 50, 50
+    new_sample = _rand.sample(new_active, k=min(NEW_CAP, len(new_active))) if new_active else []
+    other_sample = _rand.sample(other_active, k=min(OTHER_CAP, len(other_active))) if other_active else []
+    sample = new_sample + other_sample
+
+    log.info(f"  preview_validator sampling {len(sample)} rows "
+             f"(new added: {len(new_sample)} of {len(new_active)} + "
+             f"existing active: {len(other_sample)} of {len(other_active)})")
+    stats = validate_rows(sample, batch_id,
+                          newly_added_creative_ids=new_ids,
+                          enable_vision=False)  # vision off — costs money
+    if stats.get("total_rows"):
+        ok_rate = round(100 * stats.get("ok", 0) / stats["total_rows"], 1)
+        stats["ok_rate_pct"] = ok_rate
+        log.info(f"  preview validation: {stats.get('ok',0)}/{stats['total_rows']} ok "
+                 f"({ok_rate}%), broken={stats.get('broken',0)}, missing={stats.get('missing',0)}")
+        if ok_rate < 80:
+            log.warning(f"  preview ok_rate {ok_rate}% < 80% threshold — investigate "
+                        f"logs/preview_misses_{batch_id}.json before pushing")
+    return stats
+
+
 def main():
     start_time = time.time()
     log.info(f"{'=' * 60}")
     log.info(f"WEEKLY AD INTELLIGENCE PIPELINE — {BATCH_ID}")
     log.info(f"{'=' * 60}")
 
+    # Snapshot pre-merge state so we can compute deltas
+    pre_total = pre_active = 0
+    pre_coverage = 0.0
+    if os.path.exists(ADS_JS_PATH):
+        try:
+            with open(ADS_JS_PATH) as f:
+                _raw = f.read()
+            _existing = json.loads(_raw[_raw.index("["):_raw.rindex("]") + 1])
+            pre_total = len(_existing)
+            pre_active = sum(1 for r in _existing if (r.get("Status") or "Active") == "Active")
+            pre_coverage = _coverage_pct(_existing)
+        except Exception:
+            pass
+
     # Step 1: Google Ads (via Apify; FireCrawl path kept as scrape_google_ads for fallback)
-    google_ads = scrape_google_ads_apify()
+    with RunTimer() as t_google:
+        google_ads = scrape_google_ads_apify()
 
     # Step 2: Filter Cash App
-    google_ads = filter_cash_app_ads(google_ads)
+    with RunTimer() as t_filter:
+        google_ads = filter_cash_app_ads(google_ads)
 
     # Step 3: Meta Ads
-    meta_ads = scrape_meta_ads()
+    with RunTimer() as t_meta:
+        meta_ads = scrape_meta_ads()
 
     # Step 4: Merge & generate (writes public/ads_data.js)
-    all_data = merge_and_generate(google_ads, meta_ads)
+    with RunTimer() as t_merge:
+        all_data = merge_and_generate(google_ads, meta_ads)
 
-    # Step 5: Deploy is handled by `git push` → Vercel auto-deploy.
+    # Step 5: Sample-validate previews so we don't ship a broken SoT silently.
+    with RunTimer() as t_val:
+        validation_stats = _validate_preview_sample(all_data, BATCH_ID)
+
+    # Step 6: Deploy is handled by `git push` → Vercel auto-deploy.
     # The legacy `npx vercel --prod` step uploaded the 1.6 GB gitignored
     # meta_images/ working tree and timed out at 180s. Removed.
 
     # Summary
     elapsed = time.time() - start_time
+    post_active = sum(1 for d in all_data if d.get("Status") == "Active")
+    post_coverage = _coverage_pct(all_data)
+
+    # Write per-run metrics file for offline review.
+    try:
+        from pipeline.observability import total_spend_today
+        spend_today = total_spend_today()
+    except Exception:
+        spend_today = None
+
+    metrics = {
+        "batch_id": BATCH_ID,
+        "elapsed_s": round(elapsed, 1),
+        "stage_seconds": {
+            "google_apify": round(t_google.elapsed_s, 1),
+            "vision_filter": round(t_filter.elapsed_s, 1),
+            "meta_apify": round(t_meta.elapsed_s, 1),
+            "merge": round(t_merge.elapsed_s, 1),
+            "preview_validation": round(t_val.elapsed_s, 1),
+        },
+        "rows": {
+            "before_total": pre_total,
+            "before_active": pre_active,
+            "after_total": len(all_data),
+            "after_active": post_active,
+            "active_delta": post_active - pre_active,
+        },
+        "renderable_coverage_pct": {
+            "before": pre_coverage,
+            "after": post_coverage,
+        },
+        "scraped_this_run": {
+            "google_v1_rows": len(google_ads),
+            "meta_rows": len(meta_ads),
+        },
+        "preview_validation": validation_stats,
+        "spend_today_usd": spend_today,
+    }
+    metrics_path = write_run_metrics(BATCH_ID, metrics)
     log.info(f"{'=' * 60}")
-    log.info(f"DONE in {elapsed:.0f}s — {len(all_data)} total ads")
-    log.info(f"  Google Ads: {sum(1 for d in all_data if d.get('Platform') == 'Google Ads')}")
-    log.info(f"  Meta Ads: {sum(1 for d in all_data if d.get('Platform') == 'Meta Ads')}")
+    log.info(f"DONE in {elapsed:.0f}s — {len(all_data)} total ads, {post_active} active")
+    log.info(f"  Coverage: {pre_coverage}% → {post_coverage}% (active rows with renderable preview)")
+    log.info(f"  Spend today: ${spend_today or 0:.2f}")
+    log.info(f"  Metrics: {metrics_path}")
     log.info(f"  Next: git add public/ads_data.js && git commit && git push")
     log.info(f"{'=' * 60}")
 
