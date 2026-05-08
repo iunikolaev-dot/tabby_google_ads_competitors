@@ -30,8 +30,23 @@ from urllib.parse import parse_qs, urlparse
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 
-# api/ads.py lives at <repo>/api/ads.py. The DB lives at <repo>/data/ads.db.
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "ads.db"
+# Try a few candidate paths because Vercel's runtime layout for Python
+# functions isn't always `<repo>/api/ads.py` at /var/task. We pick the
+# first one that exists.
+_HERE = Path(__file__).resolve()
+_CANDIDATE_DBS = [
+    _HERE.parent.parent / "data" / "ads.db",          # local + standard layout
+    Path("/var/task/data/ads.db"),                     # Vercel canonical
+    Path.cwd() / "data" / "ads.db",                    # fallback
+    _HERE.parent / "data" / "ads.db",                  # if function bundles flat
+]
+
+
+def _resolve_db_path() -> Path | None:
+    for p in _CANDIDATE_DBS:
+        if p.exists():
+            return p
+    return None
 
 
 # ─── Field mapping (kept in sync with pipeline/sqlite_store.py) ──────────────
@@ -224,12 +239,25 @@ def compute_competitors(conn: sqlite3.Connection) -> list[str]:
 # ─── Main query ──────────────────────────────────────────────────────────────
 
 def query(params: dict) -> dict:
-    if not DB_PATH.exists():
-        return {"error": f"db not found at {DB_PATH}", "ads": [],
-                "stats": {}, "breakdown": [], "competitors": [], "total": 0,
-                "page": {"limit": 0, "offset": 0}}
+    db_path = _resolve_db_path()
+    if db_path is None:
+        # Diagnostic — list directories so we can see what got bundled.
+        diag = {}
+        for label, path in [("here", _HERE.parent), ("repo", _HERE.parent.parent),
+                             ("var_task", Path("/var/task")), ("cwd", Path.cwd())]:
+            try:
+                diag[label] = {
+                    "path": str(path),
+                    "exists": path.exists(),
+                    "ls": sorted([str(p.name) for p in path.iterdir()])[:20] if path.exists() else None,
+                }
+            except OSError as e:
+                diag[label] = {"path": str(path), "error": str(e)}
+        return {"error": "db not found", "tried": [str(p) for p in _CANDIDATE_DBS],
+                "diag": diag, "ads": [], "stats": {}, "breakdown": [],
+                "competitors": [], "total": 0, "page": {"limit": 0, "offset": 0}}
 
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
 
     where_sql, binds = build_filter_sql(params)
