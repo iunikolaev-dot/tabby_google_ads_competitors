@@ -257,7 +257,11 @@ def query(params: dict) -> dict:
                 "diag": diag, "ads": [], "stats": {}, "breakdown": [],
                 "competitors": [], "total": 0, "page": {"limit": 0, "offset": 0}}
 
-    conn = sqlite3.connect(str(db_path))
+    # Vercel's serverless filesystem is read-only outside /tmp; sqlite3's
+    # default mode tries to create -journal/-wal sidecars next to the .db
+    # file and fails with "unable to open database file". Open the URI in
+    # explicit read-only mode — no sidecars, no writes.
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)
     conn.row_factory = sqlite3.Row
 
     where_sql, binds = build_filter_sql(params)
