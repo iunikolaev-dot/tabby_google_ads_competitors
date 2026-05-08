@@ -23,5 +23,10 @@ public/meta_images/
 public/google_videos/
 public/screenshots/
 
+# SQLite ephemeral files (the .db itself IS committed — that's the SoT)
+data/*.db-wal
+data/*.db-shm
+data/*.db-journal
+
 # Personal notes
 OpenAI ad analysis prompt.rtf
