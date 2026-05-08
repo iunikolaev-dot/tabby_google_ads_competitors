@@ -114,19 +114,30 @@ INT_COLUMNS = {"seen_in_batches", "miss_streak", "schema_version", "retired"}
 def json_dict_to_row(d: dict) -> dict:
     """Translate a dashboard-style dict (one row of ads_data.js) into a
     SQLite-column-keyed dict. Skips unknown keys silently."""
+    # Per-column default when the JSON field is missing or empty. Lines up
+    # with the schema's column defaults (see data/schema.sql).
+    INT_DEFAULTS = {
+        "seen_in_batches": 1,        # any row in our DB has been seen ≥ 1 batch
+        "miss_streak": 0,
+        "schema_version": 2,
+        "retired": 0,
+    }
     row: dict = {}
     for k, v in d.items():
         col = JSON_TO_COLUMN.get(k)
         if col is None:
             continue
         if col in INT_COLUMNS:
-            try:
-                row[col] = int(v) if v not in (None, "") else 0
-            except (TypeError, ValueError):
-                row[col] = 0
-            # `retired` may be Python bool → 0/1
+            if v in (None, ""):
+                row[col] = INT_DEFAULTS.get(col, 0)
+                continue
             if col == "retired" and isinstance(v, bool):
                 row[col] = 1 if v else 0
+                continue
+            try:
+                row[col] = int(v)
+            except (TypeError, ValueError):
+                row[col] = INT_DEFAULTS.get(col, 0)
         else:
             row[col] = "" if v is None else str(v)
     # Normalize Regions[] (list) into regions_csv
@@ -193,6 +204,14 @@ _INSERT_SQL = (
 )
 
 
+_INT_DEFAULTS = {
+    "seen_in_batches": 1,        # any row in our DB has been seen ≥ 1 batch
+    "miss_streak": 0,
+    "schema_version": 2,
+    "retired": 0,
+}
+
+
 def upsert_rows(conn: sqlite3.Connection, rows: Iterable[dict]) -> int:
     """Upsert dashboard-style dicts. Returns count written."""
     n = 0
@@ -206,7 +225,12 @@ def upsert_rows(conn: sqlite3.Connection, rows: Iterable[dict]) -> int:
         # Fill missing columns with defaults — sqlite's named params demand
         # every name be present.
         for col in _COLS:
-            row.setdefault(col, 0 if col in INT_COLUMNS else "")
+            if col in row:
+                continue
+            if col in INT_COLUMNS:
+                row[col] = _INT_DEFAULTS.get(col, 0)
+            else:
+                row[col] = ""
         cur.execute(_INSERT_SQL, row)
         n += 1
     conn.commit()

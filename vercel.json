@@ -11,5 +11,12 @@
         { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive, nosnippet" }
       ]
     }
-  ]
+  ],
+  "functions": {
+    "api/ads.py": {
+      "includeFiles": "data/**",
+      "memory": 512,
+      "maxDuration": 10
+    }
+  }
 }
