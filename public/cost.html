@@ -39,10 +39,14 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .badge-fail{background:rgba(239,68,68,.15);color:#fca5a5}
 .badge-ok{background:rgba(34,197,94,.12);color:var(--green)}
 .anomaly{background:rgba(239,68,68,.06)}
-.bar-row{display:flex;gap:2px;align-items:flex-end;height:140px;padding:0 6px;border-bottom:1px solid var(--border);position:relative}
-.bar{flex:1;display:flex;flex-direction:column-reverse;border-radius:2px 2px 0 0;overflow:hidden;cursor:pointer;transition:opacity .15s;min-height:1px}
-.bar:hover{opacity:.7}
-.bar .seg{width:100%;min-height:1px}
+.chart-wrap{position:relative;padding-left:48px}
+.chart-yaxis{position:absolute;left:0;top:0;bottom:18px;width:44px;font-size:10px;color:var(--muted);pointer-events:none}
+.chart-yaxis .tick{position:absolute;right:6px;transform:translateY(-50%);font-variant-numeric:tabular-nums}
+.chart-grid{position:absolute;left:0;right:0;border-top:1px dashed rgba(139,143,163,.15);pointer-events:none}
+.bar-row{display:flex;gap:2px;align-items:flex-end;height:180px;padding:0 6px;border-bottom:1px solid var(--border);position:relative}
+.bar{flex:1;display:flex;flex-direction:column-reverse;border-radius:2px 2px 0 0;cursor:pointer;transition:opacity .15s;align-self:flex-end}
+.bar:hover{opacity:.75}
+.bar .seg{width:100%}
 .bar-row.dim .bar:not(:hover){opacity:.4}
 .bar-x{display:flex;font-size:9px;color:var(--muted);padding:4px 6px 0;justify-content:space-between}
 .tooltip{position:absolute;background:#0a0c11;border:1px solid var(--border);padding:8px 10px;border-radius:6px;font-size:11px;pointer-events:none;z-index:10;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.4)}
@@ -84,8 +88,11 @@ a{color:var(--accent-l);text-decoration:none} a:hover{text-decoration:underline}
 
 <div class="section">
   <h2>📊 Daily cost <span class="small">last 30 days, stacked by platform</span></h2>
-  <div class="bar-row" id="chart"></div>
-  <div class="bar-x" id="chartX"></div>
+  <div class="chart-wrap">
+    <div class="chart-yaxis" id="chartYAxis"></div>
+    <div class="bar-row" id="chart"></div>
+  </div>
+  <div class="bar-x" id="chartX" style="padding-left:48px"></div>
   <div class="legend" id="chartLegend"></div>
 </div>
 
@@ -173,22 +180,55 @@ function render(d){
   } else ai.textContent = 'Set APIFY_TOKEN on Vercel for account snapshot.';
 
   // ─── Chart ──
+  // Pixel-based heights. CSS percent-on-percent inside a flex column
+  // collapses to zero in some browsers (reference COST_CONSOLE.md §9).
   const chart = document.getElementById('chart');
   const chartX = document.getElementById('chartX');
-  const max = Math.max(0.001, ...d.daily.map(x=>x.total));
+  const yAxis = document.getElementById('chartYAxis');
+  const CHART_H_PX = 180;                            // matches .bar-row CSS height
+  const rawMax = Math.max(0, ...d.daily.map(x=>x.total));
+  // Round the max up to a 'nice' tick so the gridlines land on clean dollar
+  // values ($1, $2, $5, $10, $20, $50, …) instead of $6.7048.
+  function niceMax(v){
+    if(v <= 0) return 1;
+    const pow = Math.pow(10, Math.floor(Math.log10(v)));
+    const norm = v / pow;
+    const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+    return nice * pow;
+  }
+  const yMax = niceMax(rawMax);
+
+  // Y-axis ticks at 0 / 0.25 / 0.5 / 0.75 / 1.0 of yMax
+  const ticks = [0, 0.25, 0.5, 0.75, 1.0].map(f => ({frac:f, val:yMax*f}));
+  yAxis.innerHTML = ticks.map(t => {
+    // Position from the BOTTOM of the chart area (CHART_H_PX tall)
+    const bottomPx = t.frac * CHART_H_PX;
+    return `<span class="tick" style="bottom:${bottomPx + 18}px">${'$'+t.val.toFixed(t.val<1?2:t.val<10?1:0)}</span>`;
+  }).join('');
+  // Faint gridlines layered behind the bars
+  const gridLines = ticks.map(t => {
+    const bottomPx = t.frac * CHART_H_PX;
+    return `<div class="chart-grid" style="bottom:${bottomPx + 18}px"></div>`;
+  }).join('');
+
   const tooltip = document.createElement('div');
   tooltip.className = 'tooltip'; tooltip.style.display = 'none';
   document.body.appendChild(tooltip);
-  chart.innerHTML = d.daily.map(day => {
-    if(day.total === 0) return `<div class="bar" data-date="${day.date}"></div>`;
+
+  chart.innerHTML = gridLines + d.daily.map(day => {
+    if(day.total === 0) return `<div class="bar" data-date="${day.date}" style="height:0"></div>`;
+    // Total bar height in pixels (relative to yMax, not local max — keeps
+    // the scale honest across days)
+    const totalPx = Math.max(1, Math.round((day.total / yMax) * CHART_H_PX));
     const segs = Object.entries(day.by_platform).map(([plat, val]) => {
-      const h = (val/max)*100;
+      const segPx = Math.max(1, Math.round((val / day.total) * totalPx));
       const c = PLATFORM_COLORS[plat] || PLATFORM_COLORS['Other'];
-      return `<div class="seg" style="height:${h}%;background:${c}"></div>`;
+      return `<div class="seg" style="height:${segPx}px;background:${c}"></div>`;
     }).join('');
-    return `<div class="bar" data-date="${day.date}" data-total="${day.total}" data-breakdown='${JSON.stringify(day.by_platform)}'>${segs}</div>`;
+    return `<div class="bar" data-date="${day.date}" data-total="${day.total}" data-breakdown='${JSON.stringify(day.by_platform)}' style="height:${totalPx}px">${segs}</div>`;
   }).join('');
-  // Tick row: show first / mid / last labels
+
+  // Tick row under chart: first / mid / last date label
   const dates = d.daily.map(x=>x.date);
   chartX.innerHTML = `<span>${dates[0]||''}</span><span>${dates[Math.floor(dates.length/2)]||''}</span><span>${dates[dates.length-1]||''}</span>`;
 
