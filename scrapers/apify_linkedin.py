@@ -263,6 +263,7 @@ def _build_v2_row(item: dict, competitor: dict, batch_id: str, today: str) -> Op
         "Competitor Name": competitor["name"],
         "Category": competitor.get("category", "Global"),
         "Platform": "LinkedIn Ads",
+        "Status": "Active",   # LinkedIn ads in the library ARE running ads.
         "Advertiser ID": company_id,
         "Advertiser Name (Transparency Center)": item.get("advertiserName") or "",
         "Creative ID": ad_id,
