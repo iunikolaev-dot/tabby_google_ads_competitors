@@ -114,19 +114,30 @@ def _today_gst_str() -> str:
 
 def check_p1_sot_parses_and_row_count() -> CheckResult:
     """
-    P1 — public/ads_data.js parses as valid JS/JSON and contains ≥ SOT_MIN_ROW_COUNT_FRACTION
-    of the row count recorded by the previous successful run in manifest.json.
+    P1 — the SoT is readable and contains ≥ SOT_MIN_ROW_COUNT_FRACTION of the
+    row count recorded by the previous successful run in manifest.json.
 
-    If manifest.json doesn't exist yet (first run), we only require the file
-    to parse with at least 1 row.
+    SoT changed in audit step 5: data/ads.db (SQLite) replaced public/ads_data.js
+    (JSON). Read row count from whichever the repo actually has.
     """
-    rows = _load_sot_rows(config.SOT_PATH)
-    if rows is None:
-        return CheckResult("P1", "SoT parseable",
-                           False,
-                           f"{config.SOT_PATH} missing or malformed")
+    db_path = config.REPO_ROOT / "data" / "ads.db"
+    row_count: int | None = None
+    if db_path.exists():
+        try:
+            import sqlite3
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            row_count = conn.execute("SELECT COUNT(*) FROM ads").fetchone()[0]
+            conn.close()
+        except Exception as e:
+            return CheckResult("P1", "SoT parseable",
+                               False, f"{db_path} unreadable: {e}")
+    else:
+        rows = _load_sot_rows(config.SOT_PATH)
+        if rows is None:
+            return CheckResult("P1", "SoT parseable", False,
+                               f"neither {db_path} nor {config.SOT_PATH} found")
+        row_count = len(rows)
 
-    row_count = len(rows)
     manifest = _load_manifest()
     prev_count = manifest.get("row_count")
 
@@ -155,32 +166,42 @@ def check_p1_sot_parses_and_row_count() -> CheckResult:
 def check_p2_backup_exists() -> CheckResult:
     """
     P2 — a timestamped backup of the current SoT exists under backups/ with
-    SHA256 matching the current public/ads_data.js. If absent, the pipeline
-    creates one and proceeds (so this check always passes after it runs).
+    a sha256 sidecar matching the current SoT. Creates one if missing.
+
+    After audit step 5 the SoT is data/ads.db; we back that up. If only the
+    legacy public/ads_data.js exists (pre-5.1 worktree), we back that up
+    instead.
     """
-    if not config.SOT_PATH.exists():
+    db_path = config.REPO_ROOT / "data" / "ads.db"
+    if db_path.exists():
+        sot = db_path
+        backup_prefix = "ads_data_"
+        backup_ext = ".db"
+    elif config.SOT_PATH.exists():
+        sot = config.SOT_PATH
+        backup_prefix = "ads_data_"
+        backup_ext = ".js"
+    else:
         return CheckResult("P2", "Backup verified",
                            False,
-                           f"cannot backup: {config.SOT_PATH} missing")
+                           f"cannot backup: neither {db_path} nor "
+                           f"{config.SOT_PATH} present")
 
     config.BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+    sot_sha = _sha256_of_file(sot)
 
-    sot_sha = _sha256_of_file(config.SOT_PATH)
-
-    # Look for any existing backup with a matching sha in its filename or
-    # sidecar .sha256 file.
-    for existing in config.BACKUPS_DIR.glob("ads_data_*.js*"):
+    # Look for any existing backup with a matching sha in its sidecar
+    for existing in config.BACKUPS_DIR.glob(f"{backup_prefix}*{backup_ext}*"):
         sidecar = existing.with_suffix(existing.suffix + ".sha256")
         if sidecar.exists() and sidecar.read_text().strip() == sot_sha:
             return CheckResult("P2", "Backup verified",
                                True,
                                f"matching backup at {existing.name}")
 
-    # Create a fresh backup. We use uncompressed .js to keep it trivially
-    # diffable; disk is cheap compared to the cost of a corrupted merge.
+    # Create a fresh backup
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dest = config.BACKUPS_DIR / f"ads_data_{ts}.js"
-    dest.write_bytes(config.SOT_PATH.read_bytes())
+    dest = config.BACKUPS_DIR / f"{backup_prefix}{ts}{backup_ext}"
+    dest.write_bytes(sot.read_bytes())
     (dest.with_suffix(dest.suffix + ".sha256")).write_text(sot_sha)
 
     return CheckResult("P2", "Backup verified",

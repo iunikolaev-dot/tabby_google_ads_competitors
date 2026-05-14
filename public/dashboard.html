@@ -88,7 +88,7 @@ h3.section{margin-bottom:10px;font-size:15px;font-weight:600}
     <div><label>Competitor</label><select id="fComp"><option value="">All</option></select></div>
     <div><label>Region</label><select id="fReg"><option value="">All</option><option value="SA">SA</option><option value="AE">AE</option><option value="Global">Global</option></select></div>
     <div><label>Format</label><select id="fFmt"><option value="">All</option><option value="Video">Video</option><option value="Image">Image</option><option value="Text">Text</option></select></div>
-    <div><label>Platform</label><select id="fPlat"><option value="">All</option><option value="Google Ads">Google Ads</option><option value="Meta Ads">Meta Ads</option></select></div>
+    <div><label>Platform</label><select id="fPlat"><option value="">All</option><option value="Google Ads">Google Ads</option><option value="Meta Ads">Meta Ads</option><option value="LinkedIn Ads">LinkedIn Ads</option></select></div>
     <div><label>Status</label><select id="fStatus"><option value="">All</option><option value="Active" selected>Active</option><option value="Inactive">Inactive</option></select></div>
     <div><label>From</label><input type="date" id="fFrom"></div>
     <div><label>To</label><input type="date" id="fTo"></div>
@@ -174,6 +174,13 @@ function cleanVideoUrl(raw) {
 }
 function fb(f){return `<span class="badge badge-${f==='Video'?'video':f==='Image'?'image':'text'}">${f}</span>`}
 function rb(r){return `<span class="badge badge-${r.toLowerCase()}">${r}</span>`}
+function platformBadge(p){
+  // Color matches the platform's brand. Anything we don't recognize falls
+  // back to Google's blue so missing/empty Platform doesn't render as text.
+  if(p==='Meta Ads')     return '<span class="badge" style="background:rgba(167,139,250,.15);color:#a78bfa">META</span>';
+  if(p==='LinkedIn Ads') return '<span class="badge" style="background:rgba(10,102,194,.18);color:#7eb6ff">LINKEDIN</span>';
+  return '<span class="badge" style="background:rgba(59,130,246,.15);color:#60a5fa">GOOGLE</span>';
+}
 
 function openLightbox(imgUrl, vidUrl, previewUrl) {
   const lb = document.getElementById('lightbox');
@@ -222,7 +229,7 @@ function renderBreakdown(){
   const gcc = all.filter(c => c.category !== 'Global');
   const global = all.filter(c => c.category === 'Global');
   function renderCards(cards){return cards.map(c=>{
-    const platBadge=c.platform==='Meta Ads'?'<span class="badge" style="background:rgba(167,139,250,.15);color:#a78bfa">META</span>':'<span class="badge" style="background:rgba(59,130,246,.15);color:#60a5fa">GOOGLE</span>';
+    const platBadge=platformBadge(c.platform);
     return `
     <div class="breakdown-card">
       <div class="name">${c.name} ${platBadge}</div>
@@ -270,7 +277,7 @@ function renderGrid(ads, append){
       <div class="media" ${clickAction}>${media}</div>
       <div class="info">
         <div class="top-row"><span class="competitor">${ad['Competitor Name']}</span>${rb(ad['Region'])}</div>
-        <div class="tags">${fb(ad['Ad Format'])}${ad['Platform']==='Meta Ads'?'<span class="badge" style="background:rgba(167,139,250,.15);color:#a78bfa">META</span>':'<span class="badge" style="background:rgba(59,130,246,.15);color:#60a5fa">GOOGLE</span>'}${ad['Category']==='Global'?' <span class="badge" style="background:rgba(168,85,247,.15);color:#c084fc">GLOBAL</span>':''}${isNew?' <span class="badge badge-new">NEW</span>':''}${(ad['Status']||'Active')==='Inactive'?' <span class="badge badge-inactive">INACTIVE</span>':''}</div>
+        <div class="tags">${fb(ad['Ad Format'])}${platformBadge(ad['Platform'])}${ad['Category']==='Global'?' <span class="badge" style="background:rgba(168,85,247,.15);color:#c084fc">GLOBAL</span>':''}${isNew?' <span class="badge badge-new">NEW</span>':''}${(ad['Status']||'Active')==='Inactive'?' <span class="badge badge-inactive">INACTIVE</span>':''}</div>
         <div class="details">${ad['Started Running']?'Started: '+ad['Started Running']+' | ':''}Last shown: ${ad['Last Shown']||'N/A'}<br>${ad['Advertiser Name (Transparency Center)']||''}<br>
           <a href="${preview}" target="_blank">${ad['Platform']==='Meta Ads'?'Ad Library':'Transparency Center'}</a>${isVideo&&vid?' | <a href="'+preview+'" target="_blank">Video</a>':''}</div>
       </div></div>`;
@@ -286,7 +293,7 @@ function renderTable(ads, append){
     const preview=ad['Ad Preview URL']||'';
     const isNew=ad['New This Week']==='NEW';
     const plat=ad['Platform']||'Google Ads';
-    const platBadge=plat==='Meta Ads'?'<span class="badge" style="background:rgba(167,139,250,.15);color:#a78bfa">META</span>':'<span class="badge" style="background:rgba(59,130,246,.15);color:#60a5fa">GOOGLE</span>';
+    const platBadge=platformBadge(plat);
     return `<tr>
       <td><strong>${ad['Competitor Name']}</strong>${isNew?' <span class="badge badge-new">NEW</span>':''}</td>
       <td>${platBadge}</td><td>${rb(ad['Region'])}</td><td>${fb(ad['Ad Format'])}</td><td>${(ad['Status']||'Active')==='Active'?'<span style="color:var(--green)">Active</span>':'<span style="color:var(--muted)">Inactive</span>'}</td><td>${ad['Started Running']||''}</td><td>${ad['Last Shown']||''}</td>

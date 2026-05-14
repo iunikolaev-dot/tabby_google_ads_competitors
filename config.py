@@ -94,6 +94,7 @@ COMPETITORS: list[dict] = [
         "google_region": "US",
         "google_advertiser_ids": ["AR05325035143755202561"],  # Klarna INC (US)
         "meta_page_id": "390926061079580",
+        "linkedin_handle": "klarna",
         "notes": "Earlier used Klarna AB (Swedish). Correct ID is Klarna INC US.",
     },
     {
@@ -102,6 +103,7 @@ COMPETITORS: list[dict] = [
         "google_region": "GB",
         "google_advertiser_ids": ["AR14378710480124379137"],  # Wise Payments Limited
         "meta_page_id": "116206531782887",
+        "linkedin_handle": "wise",
         "notes": "",
     },
     {
@@ -110,6 +112,7 @@ COMPETITORS: list[dict] = [
         "google_region": "GB",
         "google_advertiser_ids": ["AR07289389941828616193"],  # Monzo Bank Limited
         "meta_page_id": "113612035651775",
+        "linkedin_handle": "monzo-bank",
         "notes": "",
     },
     {
@@ -118,6 +121,7 @@ COMPETITORS: list[dict] = [
         "google_region": "US",
         "google_advertiser_ids": ["AR14896030700992987137"],  # Block, Inc.
         "meta_page_id": "888799511134149",
+        "linkedin_handle": "cash-app",
         "notes": "Requires OpenAI Vision brand filter — Block Inc. also runs Square and BitKey ads under the same advertiser ID.",
     },
     {
@@ -126,6 +130,7 @@ COMPETITORS: list[dict] = [
         "google_region": "GB",
         "google_advertiser_ids": ["AR07098428377224183809"],  # Revolut Ltd
         "meta_page_id": "335642513253333",
+        "linkedin_handle": "revolut",
         "notes": "",
     },
 
