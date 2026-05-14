@@ -156,6 +156,9 @@ function cleanImageUrl(raw) {
   if (raw.includes('gstatic.com')) return raw;
   // Meta Ads images (Facebook CDN)
   if (raw.includes('fbcdn.net') || raw.includes('facebook.com') || raw.includes('scontent')) return raw;
+  // LinkedIn Ads images (media.licdn.com / dms.licdn.com). LinkedIn URLs
+  // don't end in .jpg/.png so they'd miss the extension check below.
+  if (raw.includes('licdn.com')) return raw;
   // Any direct image file URL
   if (/\.(png|jpg|jpeg|gif|webp)(\?|$)/i.test(raw)) return raw;
   return '';
