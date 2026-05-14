@@ -77,27 +77,9 @@ a{color:var(--accent-l);text-decoration:none} a:hover{text-decoration:underline}
 
 <div class="kpi-row" id="kpiRow"></div>
 
-<div class="split-row">
-  <div class="section">
-    <h2>Our tool (this pipeline) <span class="small">30d</span></h2>
-    <div class="kpi" style="padding:0;border:0;background:transparent">
-      <div class="label">Spend this month</div>
-      <div class="value" id="oursMonth">—</div>
-      <div class="sub" id="oursToday"></div>
-    </div>
-  </div>
-  <div class="section">
-    <h2>External actors <span class="small">other scrapers on this Apify account</span></h2>
-    <div class="kpi" style="padding:0;border:0;background:transparent">
-      <div class="label">Spend this month</div>
-      <div class="value" id="extMonth">—</div>
-      <div class="sub" id="extToday"></div>
-    </div>
-  </div>
-  <div class="section">
-    <h2>🪪 Apify account</h2>
-    <div class="account-info" id="acctInfo">—</div>
-  </div>
+<div class="section">
+  <h2>🪪 Apify account</h2>
+  <div class="account-info" id="acctInfo">—</div>
 </div>
 
 <div class="section">
@@ -175,15 +157,10 @@ function render(d){
   // ─── KPIs ──
   const k = d.kpis;
   document.getElementById('kpiRow').innerHTML = `
-    <div class="kpi"><div class="label">Today</div><div class="value">${fmtUsd(k.today_usd)}</div><div class="sub">${fmtUsd(k.today_ours_usd)} ours · ${fmtUsd(k.today_external_usd)} other</div></div>
+    <div class="kpi"><div class="label">Today</div><div class="value">${fmtUsd(k.today_usd)}</div></div>
     <div class="kpi"><div class="label">Last 7 days</div><div class="value">${fmtUsd(k.week_usd)}</div><div class="sub">burn ${fmtUsd(k.burn_per_day_usd)}/day</div></div>
-    <div class="kpi"><div class="label">Last 30 days</div><div class="value">${fmtUsd(k.month_usd)}</div><div class="sub">${fmtUsd(k.month_ours_usd)} ours · ${fmtUsd(k.month_external_usd)} other</div></div>
+    <div class="kpi"><div class="label">Last 30 days</div><div class="value">${fmtUsd(k.month_usd)}</div></div>
     <div class="kpi"><div class="label">Forecast / month</div><div class="value yellow">${fmtUsd(k.forecast_month_usd)}</div><div class="sub">at current burn</div></div>`;
-
-  document.getElementById('oursMonth').textContent = fmtUsd(k.month_ours_usd);
-  document.getElementById('oursToday').textContent = fmtUsd(k.today_ours_usd) + ' today';
-  document.getElementById('extMonth').textContent = fmtUsd(k.month_external_usd);
-  document.getElementById('extToday').textContent = fmtUsd(k.today_external_usd) + ' today';
 
   // ─── Account ──
   const acct = d.account;
@@ -250,8 +227,6 @@ function render(d){
       <thead><tr>
         <th>Date</th>
         <th class="num">Total</th>
-        <th class="num">Ours</th>
-        <th class="num">External</th>
         <th class="num">Google</th>
         <th class="num">Meta</th>
         <th class="num">LinkedIn</th>
@@ -268,8 +243,6 @@ function render(d){
         return `<tr${dim}>
           <td>${day.date}</td>
           <td class="num">${noActivity ? '—' : '<b>'+fmtUsd(day.total)+'</b>'}</td>
-          <td class="num">${noActivity ? '' : fmtUsd(day.ours_usd)}</td>
-          <td class="num">${noActivity ? '' : fmtUsd(day.external_usd)}</td>
           <td class="num">${goog ? fmtUsd(goog) : ''}</td>
           <td class="num">${meta ? fmtUsd(meta) : ''}</td>
           <td class="num">${li   ? fmtUsd(li)   : ''}</td>
@@ -286,7 +259,7 @@ function render(d){
     <table>
       <thead><tr>
         <th>Actor</th><th class="num">Today</th><th class="num">7d</th>
-        <th class="num">30d</th><th class="num">Runs (30d)</th><th>Tag</th>
+        <th class="num">30d</th><th class="num">Runs (30d)</th>
       </tr></thead>
       <tbody>${pa.map(r => `
         <tr>
@@ -295,7 +268,6 @@ function render(d){
           <td class="num">${fmtUsd(r.week_usd)}</td>
           <td class="num"><b>${fmtUsd(r.month_usd)}</b></td>
           <td class="num">${r.runs_30d}</td>
-          <td>${r.is_ours ? '<span class="badge badge-ours">ours</span>' : '<span class="badge badge-external">external</span>'}</td>
         </tr>`).join('')}</tbody>
     </table>` : '<div class="empty">No runs in the last 30 days.</div>';
 
@@ -323,7 +295,7 @@ function render(d){
     <table>
       <thead><tr>
         <th>Started (UTC)</th><th>Actor</th><th>Status</th><th class="num">Items</th>
-        <th class="num">Cost</th><th>Tag</th><th>Run ID</th>
+        <th class="num">Cost</th><th>Run ID</th>
       </tr></thead>
       <tbody>${rr.map(r => `
         <tr class="${r.is_anomaly?'anomaly':''}">
@@ -332,7 +304,6 @@ function render(d){
           <td>${r.status==='SUCCEEDED'?'<span class="badge badge-ok">ok</span>':'<span class="badge badge-fail">'+r.status.toLowerCase()+'</span>'}</td>
           <td class="num">${r.items?fmtN(r.items):'—'}</td>
           <td class="num">${r.is_anomaly?'⚡ ':''}<b>${fmtUsd(r.cost_usd)}</b></td>
-          <td>${r.is_ours ? '<span class="badge badge-ours">ours</span>' : '<span class="badge badge-external">external</span>'}</td>
           <td><a href="https://console.apify.com/runs/${r.run_id}" target="_blank">${r.run_id.slice(0,8)}…</a></td>
         </tr>`).join('')}</tbody>
     </table>` : '<div class="empty">No runs found.</div>';

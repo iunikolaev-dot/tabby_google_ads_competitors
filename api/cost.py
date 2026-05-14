@@ -182,6 +182,16 @@ ACTOR_TO_LABEL = {
     "apify_linkedin/silva95gustavo":     ("LinkedIn Ads — silva95gustavo", "LinkedIn Ads"),
 }
 
+# Apify actor IDs for this project's scrapers. Resolved 2026-05-14 via
+# GET /v2/acts/<username>~<actor>. Any other actorId on the same Apify
+# account belongs to a different project and is FILTERED OUT — this Cost
+# Console only counts our pipeline's spend, not the account's full bill.
+OUR_ACTOR_IDS = {
+    "AdwCDVyhFcWXQF9tg": ("LinkedIn Ads — silva95gustavo", "LinkedIn Ads"),
+    "XtaWFhbtfxyzqrFmd": ("Meta Ads — Curious Coder",      "Meta Ads"),
+    "6A1ur9FZtzzUuwWtx": ("Google Ads — crawlerbros",      "Google Ads"),
+}
+
 
 def _iso_today_minus(days: int) -> str:
     return (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days)
@@ -195,22 +205,36 @@ def _ts_today_midnight_iso() -> str:
 
 
 def aggregate(apify_runs: list[dict], ledger: list[dict]) -> dict:
-    """Compute KPIs + per-actor + per-competitor + daily + recent + anomalies."""
+    """Compute KPIs + per-actor + per-competitor + daily + recent + anomalies.
+
+    Filters input to ONLY this project's actors (see OUR_ACTOR_IDS). Other
+    actors on the same Apify account are dropped entirely — this Console
+    reports spend for *this* pipeline, not the account.
+    """
     today_iso = _ts_today_midnight_iso()
     seven_ago = _iso_today_minus(7)
     thirty_ago = _iso_today_minus(30)
 
-    # Index ledger by run_id for the join
+    # Filter to our actors. The ledger is already implicitly scoped to ours
+    # (only this project's scrapers write to it), so we filter the Apify
+    # side and leave the ledger alone.
+    apify_runs = [r for r in apify_runs if r.get("actor_id") in OUR_ACTOR_IDS]
+
+    # Index ledger by run_id for the join. Ledger entries that don't match
+    # any current Apify run still drive per-competitor numbers below.
     ledger_by_run = {e["run_id"]: e for e in ledger if e.get("run_id")}
 
-    # Tag each Apify run with our metadata when available
+    # Tag each (kept) Apify run. Since we filtered above, every run here
+    # belongs to one of OUR_ACTOR_IDS — read its label/platform from there
+    # and fold in ledger metadata when available.
     for r in apify_runs:
         meta = ledger_by_run.get(r["run_id"])
-        r["is_ours"]      = meta is not None
+        label, platform = OUR_ACTOR_IDS[r["actor_id"]]
+        r["is_ours"]      = True   # by definition; OUR_ACTOR_IDS filter
         r["competitor"]   = (meta or {}).get("competitor", "")
         r["items"]        = (meta or {}).get("items_fetched", 0)
-        r["actor_label"]  = ACTOR_TO_LABEL.get((meta or {}).get("actor", ""), (r["actor_name"], "Other"))[0]
-        r["platform"]     = ACTOR_TO_LABEL.get((meta or {}).get("actor", ""), (r["actor_name"], "Other"))[1]
+        r["actor_label"]  = label
+        r["platform"]     = platform
         r["batch_id"]     = (meta or {}).get("batch_id", "")
 
     # ─── KPIs (Apify ground truth) ──
@@ -221,10 +245,6 @@ def aggregate(apify_runs: list[dict], ledger: list[dict]) -> dict:
     today_total      = sum_since(today_iso)
     week_total       = sum_since(seven_ago)
     month_total      = sum_since(thirty_ago)
-    today_ours       = sum_since(today_iso, lambda r: r["is_ours"])
-    today_external   = today_total - today_ours
-    month_ours       = sum_since(thirty_ago, lambda r: r["is_ours"])
-    month_external   = month_total - month_ours
     burn_per_day     = round(week_total / 7, 4) if week_total else 0
     forecast_month   = round(burn_per_day * 30, 2)
 
@@ -234,10 +254,6 @@ def aggregate(apify_runs: list[dict], ledger: list[dict]) -> dict:
         "month_usd":           round(month_total, 4),
         "burn_per_day_usd":    burn_per_day,
         "forecast_month_usd":  forecast_month,
-        "today_ours_usd":      round(today_ours, 4),
-        "today_external_usd":  round(today_external, 4),
-        "month_ours_usd":      round(month_ours, 4),
-        "month_external_usd":  round(month_external, 4),
     }
 
     # ─── Per-actor (30d window) ──
@@ -302,8 +318,6 @@ def aggregate(apify_runs: list[dict], ledger: list[dict]) -> dict:
             "runs":         0,
             "failures":     0,
             "items":        0,
-            "ours_usd":     0.0,
-            "external_usd": 0.0,
         }
     for r in apify_runs:
         if r["started_at"] < thirty_ago:
@@ -322,16 +336,10 @@ def aggregate(apify_runs: list[dict], ledger: list[dict]) -> dict:
         if r["status"] in ("FAILED", "ABORTED", "TIMED-OUT"):
             slot["failures"] += 1
         slot["items"] += int(r.get("items") or 0)
-        if r["is_ours"]:
-            slot["ours_usd"] += r["cost_usd"]
-        else:
-            slot["external_usd"] += r["cost_usd"]
     for slot in by_day.values():
         slot["total"] = round(slot["total"], 4)
         slot["by_platform"] = {k: round(v, 4) for k, v in slot["by_platform"].items()}
         slot["by_actor"] = {k: round(v, 4) for k, v in slot["by_actor"].items()}
-        slot["ours_usd"] = round(slot["ours_usd"], 4)
-        slot["external_usd"] = round(slot["external_usd"], 4)
     daily = list(by_day.values())  # ordered oldest → newest
 
     # ─── All runs in window (sorted newest first; capped 500 for payload size) ──
