@@ -15,7 +15,10 @@ firecrawl_fresh_scrape.json
 embed_urls.json
 backups/
 staging/
-metrics/
+# Per-run summaries are noisy; only the spend ledger is needed at runtime
+# (api/cost.py reads it). Can't use `metrics/` + `!file` carve-outs because
+# git won't recurse into ignored directories.
+metrics/run_*.json
 logs/
 
 # Downloaded media (regenerable, large)

@@ -6,7 +6,9 @@ _deprecated/
 backups/
 staging/
 logs/
-metrics/
+# api/cost.py reads metrics/spend_history.jsonl at runtime; don't ignore.
+# Per-run summaries are unused at runtime so we strip them.
+metrics/run_*.json
 v2/
 debug_responses/
 debug_firecrawl/
