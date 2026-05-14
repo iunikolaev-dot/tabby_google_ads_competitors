@@ -87,7 +87,7 @@ a{color:var(--accent-l);text-decoration:none} a:hover{text-decoration:underline}
 </div>
 
 <div class="section">
-  <h2>📊 Daily cost <span class="small">last 30 days, stacked by platform</span></h2>
+  <h2>📊 Weekly cost <span class="small">last 8 weeks, ISO week (Mon→Sun), stacked by platform</span></h2>
   <div class="chart-wrap">
     <div class="chart-yaxis" id="chartYAxis"></div>
     <div class="bar-row" id="chart"></div>
@@ -97,8 +97,8 @@ a{color:var(--accent-l);text-decoration:none} a:hover{text-decoration:underline}
 </div>
 
 <div class="section">
-  <h2>🗓 Daily history <span class="small">last 30 days · newest first · click a row to see runs</span></h2>
-  <div id="dailyTable"></div>
+  <h2>🗓 Weekly history <span class="small">newest first</span></h2>
+  <div id="weeklyTable"></div>
 </div>
 
 <div class="section">
@@ -165,8 +165,8 @@ function render(d){
   const k = d.kpis;
   document.getElementById('kpiRow').innerHTML = `
     <div class="kpi"><div class="label">Today</div><div class="value">${fmtUsd(k.today_usd)}</div></div>
-    <div class="kpi"><div class="label">Last 7 days</div><div class="value">${fmtUsd(k.week_usd)}</div><div class="sub">burn ${fmtUsd(k.burn_per_day_usd)}/day</div></div>
-    <div class="kpi"><div class="label">Last 30 days</div><div class="value">${fmtUsd(k.month_usd)}</div></div>
+    <div class="kpi"><div class="label">This week</div><div class="value">${fmtUsd(k.week_usd)}</div></div>
+    <div class="kpi"><div class="label">Last 30 days</div><div class="value">${fmtUsd(k.month_usd)}</div><div class="sub">${k.runs_30d||0} runs · avg ${fmtUsd(k.avg_cost_per_run_usd)}/run</div></div>
     <div class="kpi"><div class="label">Forecast / month</div><div class="value yellow">${fmtUsd(k.forecast_month_usd)}</div><div class="sub">at current burn</div></div>`;
 
   // ─── Account ──
@@ -179,14 +179,17 @@ function render(d){
       <div><span class="label" style="font-size:11px">Monthly usage</span> <b>${acct.monthly_usage_usd!=null?fmtUsd(acct.monthly_usage_usd):'n/a'}</b>${acct.monthly_cap_usd?' / '+fmtUsd(acct.monthly_cap_usd):''}</div>`;
   } else ai.textContent = 'Set APIFY_TOKEN on Vercel for account snapshot.';
 
-  // ─── Chart ──
-  // Pixel-based heights. CSS percent-on-percent inside a flex column
+  // ─── Chart (weekly) ──
+  // Scrapes run weekly so daily buckets are mostly empty. Bucketing by
+  // ISO week gives a dense, readable chart even with one scrape per week.
+  // Pixel-based heights — CSS percent-on-percent inside a flex column
   // collapses to zero in some browsers (reference COST_CONSOLE.md §9).
   const chart = document.getElementById('chart');
   const chartX = document.getElementById('chartX');
   const yAxis = document.getElementById('chartYAxis');
   const CHART_H_PX = 180;                            // matches .bar-row CSS height
-  const rawMax = Math.max(0, ...d.daily.map(x=>x.total));
+  const weeklyData = d.weekly || [];
+  const rawMax = Math.max(0, ...weeklyData.map(x=>x.total));
   // Round the max up to a 'nice' tick so the gridlines land on clean dollar
   // values ($1, $2, $5, $10, $20, $50, …) instead of $6.7048.
   function niceMax(v){
@@ -215,22 +218,23 @@ function render(d){
   tooltip.className = 'tooltip'; tooltip.style.display = 'none';
   document.body.appendChild(tooltip);
 
-  chart.innerHTML = gridLines + d.daily.map(day => {
-    if(day.total === 0) return `<div class="bar" data-date="${day.date}" style="height:0"></div>`;
+  chart.innerHTML = gridLines + weeklyData.map(wk => {
+    if(wk.total === 0) return `<div class="bar" data-label="${wk.label}" style="height:0"></div>`;
     // Total bar height in pixels (relative to yMax, not local max — keeps
-    // the scale honest across days)
-    const totalPx = Math.max(1, Math.round((day.total / yMax) * CHART_H_PX));
-    const segs = Object.entries(day.by_platform).map(([plat, val]) => {
-      const segPx = Math.max(1, Math.round((val / day.total) * totalPx));
+    // the scale honest across weeks)
+    const totalPx = Math.max(1, Math.round((wk.total / yMax) * CHART_H_PX));
+    const segs = Object.entries(wk.by_platform).map(([plat, val]) => {
+      const segPx = Math.max(1, Math.round((val / wk.total) * totalPx));
       const c = PLATFORM_COLORS[plat] || PLATFORM_COLORS['Other'];
       return `<div class="seg" style="height:${segPx}px;background:${c}"></div>`;
     }).join('');
-    return `<div class="bar" data-date="${day.date}" data-total="${day.total}" data-breakdown='${JSON.stringify(day.by_platform)}' style="height:${totalPx}px">${segs}</div>`;
+    return `<div class="bar" data-label="${wk.label}" data-week-start="${wk.week_start}" data-week-end="${wk.week_end}" data-total="${wk.total}" data-breakdown='${JSON.stringify(wk.by_platform)}' style="height:${totalPx}px">${segs}</div>`;
   }).join('');
 
-  // Tick row under chart: first / mid / last date label
-  const dates = d.daily.map(x=>x.date);
-  chartX.innerHTML = `<span>${dates[0]||''}</span><span>${dates[Math.floor(dates.length/2)]||''}</span><span>${dates[dates.length-1]||''}</span>`;
+  // Tick row under chart: every week label (8 fits easily)
+  chartX.innerHTML = weeklyData.map(wk =>
+    `<span style="flex:1;text-align:center">${wk.label.replace(/^\d+-/, '')}</span>`
+  ).join('');
 
   chart.querySelectorAll('.bar').forEach(el => {
     el.addEventListener('mouseenter', e => {
@@ -239,7 +243,10 @@ function render(d){
       if(!total){ tooltip.style.display = 'none'; return; }
       const br = JSON.parse(el.getAttribute('data-breakdown')||'{}');
       const parts = Object.entries(br).sort((a,b)=>b[1]-a[1]).map(([p,v])=>`<div><span class="lab">${p}</span>${fmtUsd(v)}</div>`).join('');
-      tooltip.innerHTML = `<div><b>${el.getAttribute('data-date')}</b></div><div><span class="lab">Total</span>${fmtUsd(parseFloat(total))}</div>${parts}`;
+      const label = el.getAttribute('data-label');
+      const wkStart = el.getAttribute('data-week-start');
+      const wkEnd = el.getAttribute('data-week-end');
+      tooltip.innerHTML = `<div><b>${label}</b> <span class="lab">${wkStart} → ${wkEnd}</span></div><div><span class="lab">Total</span>${fmtUsd(parseFloat(total))}</div>${parts}`;
       tooltip.style.display = 'block';
     });
     el.addEventListener('mousemove', e => {
@@ -257,15 +264,15 @@ function render(d){
     ([p,c]) => `<span><span class="sw" style="background:${c}"></span>${p}</span>`
   ).join('');
 
-  // ─── Daily history table ──
-  // Newest day first. Per-platform $ inline so you can scan day-by-day without
-  // mousing over the chart. "Runs" / "Items" / "Failures" surface the volume
-  // alongside the dollar cost.
-  const dailyDesc = [...d.daily].reverse();
-  document.getElementById('dailyTable').innerHTML = `
+  // ─── Weekly history table ──
+  // Newest week first. Per-platform $ inline so you can scan week-by-week
+  // without mousing over the chart.
+  const weeklyDesc = [...weeklyData].reverse();
+  document.getElementById('weeklyTable').innerHTML = `
     <table>
       <thead><tr>
-        <th>Date</th>
+        <th>Week</th>
+        <th>Range</th>
         <th class="num">Total</th>
         <th class="num">Google</th>
         <th class="num">Meta</th>
@@ -274,21 +281,22 @@ function render(d){
         <th class="num">Items</th>
         <th class="num">Failed</th>
       </tr></thead>
-      <tbody>${dailyDesc.map(day => {
-        const goog = day.by_platform['Google Ads'] || 0;
-        const meta = day.by_platform['Meta Ads'] || 0;
-        const li   = day.by_platform['LinkedIn Ads'] || 0;
-        const noActivity = day.runs === 0;
+      <tbody>${weeklyDesc.map(wk => {
+        const goog = wk.by_platform['Google Ads'] || 0;
+        const meta = wk.by_platform['Meta Ads'] || 0;
+        const li   = wk.by_platform['LinkedIn Ads'] || 0;
+        const noActivity = wk.runs === 0;
         const dim = noActivity ? ' style="color:var(--muted)"' : '';
         return `<tr${dim}>
-          <td>${day.date}</td>
-          <td class="num">${noActivity ? '—' : '<b>'+fmtUsd(day.total)+'</b>'}</td>
+          <td><b>${wk.label}</b></td>
+          <td><span style="color:var(--muted);font-size:12px">${wk.week_start} → ${wk.week_end}</span></td>
+          <td class="num">${noActivity ? '—' : '<b>'+fmtUsd(wk.total)+'</b>'}</td>
           <td class="num">${goog ? fmtUsd(goog) : ''}</td>
           <td class="num">${meta ? fmtUsd(meta) : ''}</td>
           <td class="num">${li   ? fmtUsd(li)   : ''}</td>
-          <td class="num">${day.runs || ''}</td>
-          <td class="num">${day.items ? fmtN(day.items) : ''}</td>
-          <td class="num">${day.failures ? '<span class="badge badge-fail">'+day.failures+'</span>' : ''}</td>
+          <td class="num">${wk.runs || ''}</td>
+          <td class="num">${wk.items ? fmtN(wk.items) : ''}</td>
+          <td class="num">${wk.failures ? '<span class="badge badge-fail">'+wk.failures+'</span>' : ''}</td>
         </tr>`;
       }).join('')}</tbody>
     </table>`;

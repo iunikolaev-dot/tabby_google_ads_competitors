@@ -305,42 +305,68 @@ def aggregate(apify_runs: list[dict], ledger: list[dict]) -> dict:
         s["cost_per_item"] = (round(s["month_usd"] / s["items"], 6)
                               if s["items"] else None)
 
-    # ─── Daily history (30d) — drives both the bar chart AND the table ──
-    by_day: dict[str, dict] = {}
+    # ─── Weekly history — scrapes run weekly, so daily buckets are mostly
+    # empty (27 of 30 days were $0 in May 2026). Bucketing by ISO week
+    # (Monday → Sunday) gives a dense bar chart.
+    #
+    # Window: last 8 ISO weeks. Today's week is the rightmost bar.
     today_d = _dt.date.today()
-    for i in range(30):
-        d = (today_d - _dt.timedelta(days=29 - i)).isoformat()
-        by_day[d] = {
-            "date":         d,
+    monday_of_today = today_d - _dt.timedelta(days=today_d.weekday())  # Mon=0
+
+    def week_label(monday: _dt.date) -> str:
+        # ISO-week numbering — e.g. "2026-W20". Stable & timezone-free.
+        iso_y, iso_w, _ = monday.isocalendar()
+        return f"{iso_y}-W{iso_w:02d}"
+
+    WEEKS_BACK = 8
+    by_week: dict[str, dict] = {}
+    week_starts: list[_dt.date] = []
+    for i in range(WEEKS_BACK):
+        monday = monday_of_today - _dt.timedelta(weeks=WEEKS_BACK - 1 - i)
+        week_starts.append(monday)
+        sunday = monday + _dt.timedelta(days=6)
+        by_week[week_label(monday)] = {
+            "label":        week_label(monday),
+            "week_start":   monday.isoformat(),
+            "week_end":     sunday.isoformat(),
             "total":        0.0,
             "by_platform":  {},
-            "by_actor":     {},        # raw count by actor for the table
+            "by_actor":     {},
             "runs":         0,
             "failures":     0,
             "items":        0,
         }
+
+    window_start_iso = week_starts[0].isoformat()
     for r in apify_runs:
-        if r["started_at"] < thirty_ago:
+        # Only count runs inside the weekly window (which is wider than 30d
+        # so the bar chart includes the start of the earliest week)
+        if r["started_at"][:10] < window_start_iso:
             continue
-        d = r["started_at"][:10]
-        slot = by_day.get(d)
+        try:
+            d = _dt.date.fromisoformat(r["started_at"][:10])
+        except ValueError:
+            continue
+        monday = d - _dt.timedelta(days=d.weekday())
+        slot = by_week.get(week_label(monday))
         if slot is None:
             continue
         plat = r["platform"]
         slot["total"] += r["cost_usd"]
         slot["by_platform"][plat] = slot["by_platform"].get(plat, 0) + r["cost_usd"]
-        slot["by_actor"][r["actor_name"] or r["actor_id"]] = (
-            slot["by_actor"].get(r["actor_name"] or r["actor_id"], 0) + r["cost_usd"]
-        )
+        an = r["actor_name"] or r["actor_id"]
+        slot["by_actor"][an] = slot["by_actor"].get(an, 0) + r["cost_usd"]
         slot["runs"] += 1
         if r["status"] in ("FAILED", "ABORTED", "TIMED-OUT"):
             slot["failures"] += 1
         slot["items"] += int(r.get("items") or 0)
-    for slot in by_day.values():
+
+    for slot in by_week.values():
         slot["total"] = round(slot["total"], 4)
         slot["by_platform"] = {k: round(v, 4) for k, v in slot["by_platform"].items()}
         slot["by_actor"] = {k: round(v, 4) for k, v in slot["by_actor"].items()}
-    daily = list(by_day.values())  # ordered oldest → newest
+
+    weekly = list(by_week.values())  # ordered oldest → newest
 
     # ─── All runs in window (sorted newest first; capped 500 for payload size) ──
     recent = sorted(apify_runs, key=lambda r: r["started_at"], reverse=True)[:500]
@@ -368,14 +394,23 @@ def aggregate(apify_runs: list[dict], ledger: list[dict]) -> dict:
     for r in failures:
         r["cost_usd"] = round(r["cost_usd"], 4)
 
+    # Per-run average — more honest than $/day when scrapes are weekly
+    # (most days are $0; $/day understates real cost per scrape).
+    runs_in_month = sum(1 for r in apify_runs if r["started_at"] >= thirty_ago)
+    kpis["runs_30d"]            = runs_in_month
+    kpis["avg_cost_per_run_usd"] = (
+        round(month_total / runs_in_month, 4) if runs_in_month else 0
+    )
+
     return {
         "kpis":         kpis,
         "per_actor":    per_actor_list,
         "per_competitor": per_comp_list,
-        "daily":        daily,
+        "weekly":       weekly,
         "recent":       recent,
         "failures":     failures[:30],
         "as_of":        _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+        "window_weeks": WEEKS_BACK,
         "window_days":  30,
     }
 
