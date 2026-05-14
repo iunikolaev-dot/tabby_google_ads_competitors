@@ -255,6 +255,15 @@ def _build_v2_row(item: dict, competitor: dict, batch_id: str, today: str) -> Op
     image_url = item.get("imageUrl") or ""
     video_url = item.get("videoUrl") or ""
 
+    # Reject unrenderable rows. The actor sometimes returns format=SINGLE_IMAGE
+    # with no imageUrl (observed on Monzo Showcase-Page ads — Greg at Monzo,
+    # etc.; LinkedIn's detail page is auth-gated so backfill failed too).
+    # Without an image or video URL there's nothing to show in the dashboard;
+    # the click-through is just a placeholder. User decision 2026-05-14: drop
+    # them rather than clutter the grid.
+    if not image_url and not video_url:
+        return None
+
     ctas = _parse_ctas(item.get("ctas"))
     start_date, end_date = _parse_availability(item.get("availability"))
 
