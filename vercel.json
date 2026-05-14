@@ -17,6 +17,11 @@
       "includeFiles": "data/**",
       "memory": 512,
       "maxDuration": 10
+    },
+    "api/cost.py": {
+      "includeFiles": "metrics/**",
+      "memory": 512,
+      "maxDuration": 15
     }
   }
 }

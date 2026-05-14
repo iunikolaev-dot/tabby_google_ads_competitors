@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
+<title>Cost Console — Competitor Ad Intelligence</title>
+<style>
+:root{--bg:#0f1117;--card:#1a1d27;--border:#2a2d3a;--text:#e4e6eb;--muted:#8b8fa3;--accent:#6366f1;--accent-l:#818cf8;--green:#22c55e;--red:#ef4444;--yellow:#eab308;--blue:#3b82f6;--purple:#a78bfa;--linkedin:#7eb6ff}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+.container{max-width:1400px;margin:0 auto;padding:24px}
+.header{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:24px;flex-wrap:wrap;gap:16px}
+.header h1{font-size:24px;font-weight:700} .header h1 span{color:var(--accent-l)}
+.header .meta{color:var(--muted);font-size:13px}
+.header .controls{display:flex;gap:12px;align-items:center}
+.back{color:var(--accent-l);text-decoration:none;font-size:13px} .back:hover{text-decoration:underline}
+.btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer}
+.btn:hover{opacity:.85} .btn:disabled{opacity:.4;cursor:not-allowed}
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:24px}
+.kpi{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px}
+.kpi .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.kpi .value{font-size:28px;font-weight:700}
+.kpi .sub{font-size:11px;color:var(--muted);margin-top:2px}
+.kpi .value.green{color:var(--green)} .kpi .value.red{color:var(--red)} .kpi .value.yellow{color:var(--yellow)}
+.split-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:24px}
+@media(max-width:900px){.split-row{grid-template-columns:1fr}}
+.section{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:24px}
+.section h2{font-size:15px;font-weight:600;margin-bottom:12px;display:flex;justify-content:space-between;align-items:baseline}
+.section h2 .small{font-size:11px;color:var(--muted);font-weight:400}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:#12141c;padding:8px 10px;text-align:left;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:hover td{background:rgba(99,102,241,.04)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.badge{display:inline-block;padding:1px 7px;border-radius:5px;font-size:10px;font-weight:600;text-transform:uppercase}
+.badge-ours{background:rgba(99,102,241,.15);color:var(--accent-l)}
+.badge-external{background:rgba(139,143,163,.15);color:var(--muted)}
+.badge-fail{background:rgba(239,68,68,.15);color:#fca5a5}
+.badge-ok{background:rgba(34,197,94,.12);color:var(--green)}
+.anomaly{background:rgba(239,68,68,.06)}
+.bar-row{display:flex;gap:2px;align-items:flex-end;height:140px;padding:0 6px;border-bottom:1px solid var(--border);position:relative}
+.bar{flex:1;display:flex;flex-direction:column-reverse;border-radius:2px 2px 0 0;overflow:hidden;cursor:pointer;transition:opacity .15s;min-height:1px}
+.bar:hover{opacity:.7}
+.bar .seg{width:100%;min-height:1px}
+.bar-row.dim .bar:not(:hover){opacity:.4}
+.bar-x{display:flex;font-size:9px;color:var(--muted);padding:4px 6px 0;justify-content:space-between}
+.tooltip{position:absolute;background:#0a0c11;border:1px solid var(--border);padding:8px 10px;border-radius:6px;font-size:11px;pointer-events:none;z-index:10;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.4)}
+.tooltip .lab{color:var(--muted);margin-right:6px}
+.legend{display:flex;gap:14px;font-size:11px;color:var(--muted);margin-top:8px;flex-wrap:wrap}
+.legend .sw{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:middle;margin-right:5px}
+.account-info{font-size:12px;color:var(--muted);line-height:1.7}
+.account-info b{color:var(--text)}
+.mode-banner{background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.3);color:#facc15;padding:10px 14px;border-radius:8px;margin-bottom:20px;font-size:13px}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent-l);border-radius:50%;animation:spin .6s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+a{color:var(--accent-l);text-decoration:none} a:hover{text-decoration:underline}
+.empty{padding:24px;color:var(--muted);text-align:center;font-size:13px}
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="header">
+  <div>
+    <h1>💰 Cost <span>Console</span></h1>
+    <div class="meta">Apify ground truth · ledger join · live numbers</div>
+  </div>
+  <div class="controls">
+    <a class="back" href="/dashboard.html">← Dashboard</a>
+    <span class="meta" id="asof"></span>
+    <button class="btn" id="reloadBtn">↻ Refresh now</button>
+  </div>
+</div>
+
+<div id="modeBanner"></div>
+
+<div class="kpi-row" id="kpiRow"></div>
+
+<div class="split-row">
+  <div class="section">
+    <h2>Our tool (this pipeline) <span class="small">30d</span></h2>
+    <div class="kpi" style="padding:0;border:0;background:transparent">
+      <div class="label">Spend this month</div>
+      <div class="value" id="oursMonth">—</div>
+      <div class="sub" id="oursToday"></div>
+    </div>
+  </div>
+  <div class="section">
+    <h2>External actors <span class="small">other scrapers on this Apify account</span></h2>
+    <div class="kpi" style="padding:0;border:0;background:transparent">
+      <div class="label">Spend this month</div>
+      <div class="value" id="extMonth">—</div>
+      <div class="sub" id="extToday"></div>
+    </div>
+  </div>
+  <div class="section">
+    <h2>🪪 Apify account</h2>
+    <div class="account-info" id="acctInfo">—</div>
+  </div>
+</div>
+
+<div class="section">
+  <h2>📊 Daily cost <span class="small">last 30 days, stacked by platform</span></h2>
+  <div class="bar-row" id="chart"></div>
+  <div class="bar-x" id="chartX"></div>
+  <div class="legend" id="chartLegend"></div>
+</div>
+
+<div class="section">
+  <h2>Per-actor <span class="small">30d window</span></h2>
+  <div id="perActor"></div>
+</div>
+
+<div class="section">
+  <h2>Per-competitor <span class="small">ours only · 30d window</span></h2>
+  <div id="perComp"></div>
+</div>
+
+<div class="section">
+  <h2>Recent runs <span class="small">last 60 · ⚡ = anomaly (cost &gt; 2× source avg)</span></h2>
+  <div id="recent"></div>
+</div>
+
+<div class="section" id="failuresSection" style="display:none">
+  <h2 style="color:var(--red)">⚠️ Failed runs <span class="small">last 7 days</span></h2>
+  <div id="failures"></div>
+</div>
+
+</div>
+
+<script>
+const PLATFORM_COLORS = {
+  'Google Ads':  '#60a5fa',
+  'Meta Ads':    '#a78bfa',
+  'LinkedIn Ads': '#7eb6ff',
+  'Other':       '#94a3b8',
+};
+
+function fmtUsd(v){if(v==null)return '—';const n=Number(v);return '$'+n.toFixed(n<1?4:2)}
+function fmtN(v){if(v==null)return '—';return Number(v).toLocaleString()}
+function fmtDate(iso){if(!iso)return '—';return iso.slice(0,10)}
+function fmtTime(iso){if(!iso)return '—';return iso.slice(5,16).replace('T',' ')}
+
+async function load(){
+  const btn = document.getElementById('reloadBtn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Refreshing';
+  try {
+    // Cache-bust to defeat any CDN layer
+    const r = await fetch('/api/cost?t=' + Date.now(), {cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data = await r.json();
+    render(data);
+    document.getElementById('asof').textContent = 'as of ' + fmtTime(data.as_of) + ' UTC';
+  } catch(e){
+    document.getElementById('kpiRow').innerHTML = '<div class="empty">Failed to load: '+e.message+'</div>';
+  } finally {
+    btn.disabled = false; btn.innerHTML = '↻ Refresh now';
+  }
+}
+
+function render(d){
+  // ─── Mode banner ──
+  const mb = document.getElementById('modeBanner');
+  if(d.mode && d.mode !== 'live'){
+    mb.className = 'mode-banner';
+    mb.textContent = d.mode;
+  } else mb.innerHTML = '';
+
+  // ─── KPIs ──
+  const k = d.kpis;
+  document.getElementById('kpiRow').innerHTML = `
+    <div class="kpi"><div class="label">Today</div><div class="value">${fmtUsd(k.today_usd)}</div><div class="sub">${fmtUsd(k.today_ours_usd)} ours · ${fmtUsd(k.today_external_usd)} other</div></div>
+    <div class="kpi"><div class="label">Last 7 days</div><div class="value">${fmtUsd(k.week_usd)}</div><div class="sub">burn ${fmtUsd(k.burn_per_day_usd)}/day</div></div>
+    <div class="kpi"><div class="label">Last 30 days</div><div class="value">${fmtUsd(k.month_usd)}</div><div class="sub">${fmtUsd(k.month_ours_usd)} ours · ${fmtUsd(k.month_external_usd)} other</div></div>
+    <div class="kpi"><div class="label">Forecast / month</div><div class="value yellow">${fmtUsd(k.forecast_month_usd)}</div><div class="sub">at current burn</div></div>`;
+
+  document.getElementById('oursMonth').textContent = fmtUsd(k.month_ours_usd);
+  document.getElementById('oursToday').textContent = fmtUsd(k.today_ours_usd) + ' today';
+  document.getElementById('extMonth').textContent = fmtUsd(k.month_external_usd);
+  document.getElementById('extToday').textContent = fmtUsd(k.today_external_usd) + ' today';
+
+  // ─── Account ──
+  const acct = d.account;
+  const ai = document.getElementById('acctInfo');
+  if(acct){
+    ai.innerHTML = `
+      <div><span class="label" style="font-size:11px">User</span> <b>${acct.username||'—'}</b></div>
+      <div><span class="label" style="font-size:11px">Plan</span> <b>${acct.plan_id||'—'}</b></div>
+      <div><span class="label" style="font-size:11px">Monthly usage</span> <b>${acct.monthly_usage_usd!=null?fmtUsd(acct.monthly_usage_usd):'n/a'}</b>${acct.monthly_cap_usd?' / '+fmtUsd(acct.monthly_cap_usd):''}</div>`;
+  } else ai.textContent = 'Set APIFY_TOKEN on Vercel for account snapshot.';
+
+  // ─── Chart ──
+  const chart = document.getElementById('chart');
+  const chartX = document.getElementById('chartX');
+  const max = Math.max(0.001, ...d.daily.map(x=>x.total));
+  const tooltip = document.createElement('div');
+  tooltip.className = 'tooltip'; tooltip.style.display = 'none';
+  document.body.appendChild(tooltip);
+  chart.innerHTML = d.daily.map(day => {
+    if(day.total === 0) return `<div class="bar" data-date="${day.date}"></div>`;
+    const segs = Object.entries(day.by_platform).map(([plat, val]) => {
+      const h = (val/max)*100;
+      const c = PLATFORM_COLORS[plat] || PLATFORM_COLORS['Other'];
+      return `<div class="seg" style="height:${h}%;background:${c}"></div>`;
+    }).join('');
+    return `<div class="bar" data-date="${day.date}" data-total="${day.total}" data-breakdown='${JSON.stringify(day.by_platform)}'>${segs}</div>`;
+  }).join('');
+  // Tick row: show first / mid / last labels
+  const dates = d.daily.map(x=>x.date);
+  chartX.innerHTML = `<span>${dates[0]||''}</span><span>${dates[Math.floor(dates.length/2)]||''}</span><span>${dates[dates.length-1]||''}</span>`;
+
+  chart.querySelectorAll('.bar').forEach(el => {
+    el.addEventListener('mouseenter', e => {
+      chart.classList.add('dim');
+      const total = el.getAttribute('data-total');
+      if(!total){ tooltip.style.display = 'none'; return; }
+      const br = JSON.parse(el.getAttribute('data-breakdown')||'{}');
+      const parts = Object.entries(br).sort((a,b)=>b[1]-a[1]).map(([p,v])=>`<div><span class="lab">${p}</span>${fmtUsd(v)}</div>`).join('');
+      tooltip.innerHTML = `<div><b>${el.getAttribute('data-date')}</b></div><div><span class="lab">Total</span>${fmtUsd(parseFloat(total))}</div>${parts}`;
+      tooltip.style.display = 'block';
+    });
+    el.addEventListener('mousemove', e => {
+      tooltip.style.left = (e.pageX + 14) + 'px';
+      tooltip.style.top = (e.pageY - 10) + 'px';
+    });
+    el.addEventListener('mouseleave', () => {
+      chart.classList.remove('dim');
+      tooltip.style.display = 'none';
+    });
+  });
+
+  // Legend
+  document.getElementById('chartLegend').innerHTML = Object.entries(PLATFORM_COLORS).map(
+    ([p,c]) => `<span><span class="sw" style="background:${c}"></span>${p}</span>`
+  ).join('');
+
+  // ─── Per-actor table ──
+  const pa = d.per_actor;
+  document.getElementById('perActor').innerHTML = pa.length ? `
+    <table>
+      <thead><tr>
+        <th>Actor</th><th class="num">Today</th><th class="num">7d</th>
+        <th class="num">30d</th><th class="num">Runs (30d)</th><th>Tag</th>
+      </tr></thead>
+      <tbody>${pa.map(r => `
+        <tr>
+          <td>${r.actor_name}<br><span class="meta" style="font-size:10px;color:var(--muted)">${r.actor_id}</span></td>
+          <td class="num">${fmtUsd(r.today_usd)}</td>
+          <td class="num">${fmtUsd(r.week_usd)}</td>
+          <td class="num"><b>${fmtUsd(r.month_usd)}</b></td>
+          <td class="num">${r.runs_30d}</td>
+          <td>${r.is_ours ? '<span class="badge badge-ours">ours</span>' : '<span class="badge badge-external">external</span>'}</td>
+        </tr>`).join('')}</tbody>
+    </table>` : '<div class="empty">No runs in the last 30 days.</div>';
+
+  // ─── Per-competitor table ──
+  const pc = d.per_competitor;
+  document.getElementById('perComp').innerHTML = pc.length ? `
+    <table>
+      <thead><tr>
+        <th>Competitor</th><th class="num">Runs (30d)</th><th class="num">Items</th>
+        <th class="num">Spend (30d)</th><th class="num">$/item</th>
+      </tr></thead>
+      <tbody>${pc.map(r => `
+        <tr>
+          <td>${r.competitor}</td>
+          <td class="num">${r.runs}</td>
+          <td class="num">${fmtN(r.items)}</td>
+          <td class="num"><b>${fmtUsd(r.month_usd)}</b></td>
+          <td class="num">${r.cost_per_item != null ? '$' + r.cost_per_item.toFixed(6) : '—'}</td>
+        </tr>`).join('')}</tbody>
+    </table>` : '<div class="empty">No ledger entries in the last 30 days.</div>';
+
+  // ─── Recent runs ──
+  const rr = d.recent;
+  document.getElementById('recent').innerHTML = rr.length ? `
+    <table>
+      <thead><tr>
+        <th>Started (UTC)</th><th>Actor</th><th>Status</th><th class="num">Items</th>
+        <th class="num">Cost</th><th>Tag</th><th>Run ID</th>
+      </tr></thead>
+      <tbody>${rr.map(r => `
+        <tr class="${r.is_anomaly?'anomaly':''}">
+          <td>${fmtTime(r.started_at)}</td>
+          <td>${r.actor_name || r.actor_id}${r.competitor?' / '+r.competitor:''}</td>
+          <td>${r.status==='SUCCEEDED'?'<span class="badge badge-ok">ok</span>':'<span class="badge badge-fail">'+r.status.toLowerCase()+'</span>'}</td>
+          <td class="num">${r.items?fmtN(r.items):'—'}</td>
+          <td class="num">${r.is_anomaly?'⚡ ':''}<b>${fmtUsd(r.cost_usd)}</b></td>
+          <td>${r.is_ours ? '<span class="badge badge-ours">ours</span>' : '<span class="badge badge-external">external</span>'}</td>
+          <td><a href="https://console.apify.com/runs/${r.run_id}" target="_blank">${r.run_id.slice(0,8)}…</a></td>
+        </tr>`).join('')}</tbody>
+    </table>` : '<div class="empty">No runs found.</div>';
+
+  // ─── Failures ──
+  const fs = d.failures;
+  const fsec = document.getElementById('failuresSection');
+  if(fs.length){
+    fsec.style.display = 'block';
+    document.getElementById('failures').innerHTML = `
+      <table>
+        <thead><tr><th>Started</th><th>Actor</th><th>Status</th><th>Run ID</th></tr></thead>
+        <tbody>${fs.map(r => `
+          <tr><td>${fmtTime(r.started_at)}</td><td>${r.actor_name||r.actor_id}</td><td><span class="badge badge-fail">${r.status.toLowerCase()}</span></td>
+              <td><a href="https://console.apify.com/runs/${r.run_id}" target="_blank">${r.run_id.slice(0,8)}…</a></td></tr>`).join('')}</tbody>
+      </table>`;
+  } else fsec.style.display = 'none';
+}
+
+document.getElementById('reloadBtn').addEventListener('click', () => load());
+load();
+setInterval(() => load(), 60_000);
+</script>
+</body>
+</html>
