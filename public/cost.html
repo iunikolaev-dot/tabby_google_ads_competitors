@@ -108,6 +108,11 @@ a{color:var(--accent-l);text-decoration:none} a:hover{text-decoration:underline}
 </div>
 
 <div class="section">
+  <h2>🗓 Daily history <span class="small">last 30 days · newest first · click a row to see runs</span></h2>
+  <div id="dailyTable"></div>
+</div>
+
+<div class="section">
   <h2>Per-actor <span class="small">30d window</span></h2>
   <div id="perActor"></div>
 </div>
@@ -118,7 +123,7 @@ a{color:var(--accent-l);text-decoration:none} a:hover{text-decoration:underline}
 </div>
 
 <div class="section">
-  <h2>Recent runs <span class="small">last 60 · ⚡ = anomaly (cost &gt; 2× source avg)</span></h2>
+  <h2>All runs <span class="small">last 30 days · ⚡ = anomaly (cost &gt; 2× source avg)</span></h2>
   <div id="recent"></div>
 </div>
 
@@ -234,6 +239,46 @@ function render(d){
   document.getElementById('chartLegend').innerHTML = Object.entries(PLATFORM_COLORS).map(
     ([p,c]) => `<span><span class="sw" style="background:${c}"></span>${p}</span>`
   ).join('');
+
+  // ─── Daily history table ──
+  // Newest day first. Per-platform $ inline so you can scan day-by-day without
+  // mousing over the chart. "Runs" / "Items" / "Failures" surface the volume
+  // alongside the dollar cost.
+  const dailyDesc = [...d.daily].reverse();
+  document.getElementById('dailyTable').innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Date</th>
+        <th class="num">Total</th>
+        <th class="num">Ours</th>
+        <th class="num">External</th>
+        <th class="num">Google</th>
+        <th class="num">Meta</th>
+        <th class="num">LinkedIn</th>
+        <th class="num">Runs</th>
+        <th class="num">Items</th>
+        <th class="num">Failed</th>
+      </tr></thead>
+      <tbody>${dailyDesc.map(day => {
+        const goog = day.by_platform['Google Ads'] || 0;
+        const meta = day.by_platform['Meta Ads'] || 0;
+        const li   = day.by_platform['LinkedIn Ads'] || 0;
+        const noActivity = day.runs === 0;
+        const dim = noActivity ? ' style="color:var(--muted)"' : '';
+        return `<tr${dim}>
+          <td>${day.date}</td>
+          <td class="num">${noActivity ? '—' : '<b>'+fmtUsd(day.total)+'</b>'}</td>
+          <td class="num">${noActivity ? '' : fmtUsd(day.ours_usd)}</td>
+          <td class="num">${noActivity ? '' : fmtUsd(day.external_usd)}</td>
+          <td class="num">${goog ? fmtUsd(goog) : ''}</td>
+          <td class="num">${meta ? fmtUsd(meta) : ''}</td>
+          <td class="num">${li   ? fmtUsd(li)   : ''}</td>
+          <td class="num">${day.runs || ''}</td>
+          <td class="num">${day.items ? fmtN(day.items) : ''}</td>
+          <td class="num">${day.failures ? '<span class="badge badge-fail">'+day.failures+'</span>' : ''}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
 
   // ─── Per-actor table ──
   const pa = d.per_actor;

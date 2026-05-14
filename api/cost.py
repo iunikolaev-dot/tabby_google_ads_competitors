@@ -289,12 +289,22 @@ def aggregate(apify_runs: list[dict], ledger: list[dict]) -> dict:
         s["cost_per_item"] = (round(s["month_usd"] / s["items"], 6)
                               if s["items"] else None)
 
-    # ─── Daily stacked-bar data (30d) ──
+    # ─── Daily history (30d) — drives both the bar chart AND the table ──
     by_day: dict[str, dict] = {}
     today_d = _dt.date.today()
     for i in range(30):
         d = (today_d - _dt.timedelta(days=29 - i)).isoformat()
-        by_day[d] = {"date": d, "total": 0.0, "by_platform": {}}
+        by_day[d] = {
+            "date":         d,
+            "total":        0.0,
+            "by_platform":  {},
+            "by_actor":     {},        # raw count by actor for the table
+            "runs":         0,
+            "failures":     0,
+            "items":        0,
+            "ours_usd":     0.0,
+            "external_usd": 0.0,
+        }
     for r in apify_runs:
         if r["started_at"] < thirty_ago:
             continue
@@ -305,13 +315,27 @@ def aggregate(apify_runs: list[dict], ledger: list[dict]) -> dict:
         plat = r["platform"]
         slot["total"] += r["cost_usd"]
         slot["by_platform"][plat] = slot["by_platform"].get(plat, 0) + r["cost_usd"]
+        slot["by_actor"][r["actor_name"] or r["actor_id"]] = (
+            slot["by_actor"].get(r["actor_name"] or r["actor_id"], 0) + r["cost_usd"]
+        )
+        slot["runs"] += 1
+        if r["status"] in ("FAILED", "ABORTED", "TIMED-OUT"):
+            slot["failures"] += 1
+        slot["items"] += int(r.get("items") or 0)
+        if r["is_ours"]:
+            slot["ours_usd"] += r["cost_usd"]
+        else:
+            slot["external_usd"] += r["cost_usd"]
     for slot in by_day.values():
         slot["total"] = round(slot["total"], 4)
         slot["by_platform"] = {k: round(v, 4) for k, v in slot["by_platform"].items()}
-    daily = list(by_day.values())  # already ordered oldest → newest
+        slot["by_actor"] = {k: round(v, 4) for k, v in slot["by_actor"].items()}
+        slot["ours_usd"] = round(slot["ours_usd"], 4)
+        slot["external_usd"] = round(slot["external_usd"], 4)
+    daily = list(by_day.values())  # ordered oldest → newest
 
-    # ─── Recent 60 runs ──
-    recent = sorted(apify_runs, key=lambda r: r["started_at"], reverse=True)[:60]
+    # ─── All runs in window (sorted newest first; capped 500 for payload size) ──
+    recent = sorted(apify_runs, key=lambda r: r["started_at"], reverse=True)[:500]
 
     # ─── Anomaly flag (cost > 2× source mean) ──
     source_avg: dict[str, float] = {}
